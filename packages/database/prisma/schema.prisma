@@ -1,0 +1,225 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ClientStatus {
+  active
+  trial
+  paused
+  churn
+}
+
+enum ClientClassification {
+  strategic
+  growth
+  standard
+  at_risk
+}
+
+enum ChannelType {
+  whatsapp
+  instagram
+  email
+  site
+  manual
+}
+
+enum CustomerLifecycleStage {
+  new
+  qualified
+  proposal
+  won
+  lost
+  support
+}
+
+enum LeadTemperature {
+  hot
+  warm
+  cold
+}
+
+enum Priority {
+  high
+  medium
+  low
+}
+
+enum LabelCategory {
+  profile
+  behavior
+  deal
+  risk
+  channel
+}
+
+enum ConversationStatus {
+  open
+  waiting_customer
+  waiting_agent
+  closed
+}
+
+enum SlaStatus {
+  on_time
+  warning
+  late
+}
+
+enum SenderType {
+  agent
+  end_customer
+  system
+}
+
+enum TaskStatus {
+  open
+  done
+  canceled
+}
+
+model CrmClient {
+  id             String                 @id @default(cuid())
+  legalName      String                 @map("legal_name")
+  tradeName      String                 @map("trade_name")
+  documentNumber String?                @map("document_number")
+  segment        String
+  planName       String                 @map("plan_name")
+  status         ClientStatus
+  classification ClientClassification
+  ownerName      String                 @map("owner_name")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  channels       ClientChannel[]
+  customers      EndCustomer[]
+  conversations  Conversation[]
+  labels         Label[]
+  tasks          Task[]
+
+  @@index([status])
+  @@map("crm_clients")
+}
+
+model ClientChannel {
+  id                String      @id @default(cuid())
+  crmClientId       String      @map("crm_client_id")
+  channelType       ChannelType @map("channel_type")
+  displayName       String      @map("display_name")
+  externalReference String?     @map("external_reference")
+  isActive          Boolean     @default(true) @map("is_active")
+  crmClient         CrmClient   @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
+
+  @@index([crmClientId])
+  @@map("client_channels")
+}
+
+model EndCustomer {
+  id                  String             @id @default(cuid())
+  crmClientId         String             @map("crm_client_id")
+  fullName            String             @map("full_name")
+  companyName         String?            @map("company_name")
+  phone               String?
+  instagramHandle     String?            @map("instagram_handle")
+  email               String?
+  documentNumber      String?            @map("document_number")
+  originChannel       ChannelType        @map("origin_channel")
+  lifecycleStage      CustomerLifecycleStage @map("lifecycle_stage")
+  leadTemperature     LeadTemperature    @map("lead_temperature")
+  priority            Priority
+  score               Int                @default(0)
+  estimatedValueCents Int                @default(0) @map("estimated_value_cents")
+  assignedTo          String?            @map("assigned_to")
+  lastContactAt       DateTime?          @map("last_contact_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+  crmClient           CrmClient          @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
+  conversations       Conversation[]
+  labels              EndCustomerLabel[]
+  tasks               Task[]
+
+  @@index([crmClientId])
+  @@index([lifecycleStage])
+  @@map("end_customers")
+}
+
+model Label {
+  id          String             @id @default(cuid())
+  crmClientId String?            @map("crm_client_id")
+  name        String
+  color       String
+  category    LabelCategory
+  crmClient   CrmClient?         @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
+  customers   EndCustomerLabel[]
+
+  @@unique([crmClientId, name])
+  @@index([crmClientId])
+  @@map("labels")
+}
+
+model EndCustomerLabel {
+  endCustomerId String      @map("end_customer_id")
+  labelId       String      @map("label_id")
+  endCustomer   EndCustomer @relation(fields: [endCustomerId], references: [id], onDelete: Cascade)
+  label         Label       @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([endCustomerId, labelId])
+  @@map("end_customer_labels")
+}
+
+model Conversation {
+  id                 String             @id @default(cuid())
+  crmClientId        String             @map("crm_client_id")
+  endCustomerId      String             @map("end_customer_id")
+  channelType        ChannelType        @map("channel_type")
+  status             ConversationStatus
+  stage              String
+  slaStatus          SlaStatus          @map("sla_status")
+  lastMessagePreview String             @map("last_message_preview")
+  lastMessageAt      DateTime           @map("last_message_at")
+  unreadCount        Int                @default(0) @map("unread_count")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  crmClient          CrmClient          @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
+  endCustomer        EndCustomer        @relation(fields: [endCustomerId], references: [id], onDelete: Cascade)
+  messages           Message[]
+
+  @@index([channelType, status])
+  @@index([endCustomerId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String       @map("conversation_id")
+  senderType     SenderType   @map("sender_type")
+  senderName     String       @map("sender_name")
+  body           String
+  sentAt         DateTime     @map("sent_at")
+  readAt         DateTime?    @map("read_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, sentAt])
+  @@map("messages")
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  crmClientId   String       @map("crm_client_id")
+  endCustomerId String?      @map("end_customer_id")
+  title         String
+  status        TaskStatus
+  dueAt         DateTime?    @map("due_at")
+  ownerName     String       @map("owner_name")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  crmClient     CrmClient    @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
+  endCustomer   EndCustomer? @relation(fields: [endCustomerId], references: [id], onDelete: Cascade)
+
+  @@index([crmClientId])
+  @@index([endCustomerId])
+  @@map("tasks")
+}
