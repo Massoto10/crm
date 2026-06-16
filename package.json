@@ -16,6 +16,7 @@
     "db:seed": "npm run prisma:seed --workspace @stn-crm/database"
   },
   "devDependencies": {
+    "playwright": "^1.60.0",
     "typescript": "^5.5.4"
   },
   "dependencies": {

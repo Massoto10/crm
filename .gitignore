@@ -6,3 +6,8 @@ dist
 .turbo
 coverage
 *.log
+*.tsbuildinfo
+# screenshots / scripts soltos de teste
+screenshot-*.png
+ss-*.png
+screenshot-*.mjs
