@@ -11,3 +11,5 @@ coverage
 screenshot-*.png
 ss-*.png
 screenshot-*.mjs
+
+.vercel
