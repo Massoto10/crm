@@ -619,6 +619,7 @@ export default function HomePage() {
             onAddLabel={addLabel} onChangeLabel={setNewLabel} onMoveClient={moveClient}
             onRemoveLabel={removeLabel} onSelectClient={setSelectedClientId}
             crmClientId={firstCrmClientId} canSchedule={canView("scheduling")}
+            onNewConversation={() => setShowProspeccaoModal(true)}
             onError={(msg) => toast(msg, "error")} onInfo={(msg) => toast(msg, "success")}
           />
         )}
@@ -835,13 +836,14 @@ function DashboardView({
 
 function ClientsView({
   clients, selectedClient, newLabel, onAddLabel, onChangeLabel, onMoveClient, onRemoveLabel, onSelectClient,
-  crmClientId, canSchedule, onError, onInfo
+  crmClientId, canSchedule, onNewConversation, onError, onInfo
 }: {
   clients: ClientCard[]; selectedClient: ClientCard | null; newLabel: string;
   onAddLabel: (e: FormEvent<HTMLFormElement>) => void; onChangeLabel: (v: string) => void;
   onMoveClient: (id: string, stage: Stage) => void; onRemoveLabel: (clientId: string, labelId: string) => void;
   onSelectClient: (id: string) => void;
   crmClientId: string | null; canSchedule: boolean;
+  onNewConversation: () => void;
   onError: (msg: string) => void; onInfo: (msg: string) => void;
 }) {
   const [showBulk, setShowBulk] = useState(false);
@@ -851,7 +853,8 @@ function ClientsView({
         <div><p className="eyebrow">Clientes dos clientes</p><h1>Clientes</h1></div>
         <div className="topbar-actions">
           <label className="search-box"><span>Q</span><input type="search" placeholder="Buscar cliente, empresa ou label" /></label>
-          {canSchedule && <button className="primary-button" type="button" onClick={() => setShowBulk(true)} disabled={clients.length === 0}>Disparo em massa</button>}
+          <button className="primary-button" type="button" onClick={onNewConversation}>Nova conversa</button>
+          {canSchedule && <button className="secondary-button" type="button" onClick={() => setShowBulk(true)} disabled={clients.length === 0}>Disparo em massa</button>}
         </div>
       </header>
       {showBulk && crmClientId && (
@@ -1818,6 +1821,53 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
                   </select>
                 </label>
               </div>
+
+              <div className="rule-item">
+                <label className="rule-toggle">
+                  <input
+                    type="checkbox"
+                    checked={rules["trigger_close_enabled"] === "true"}
+                    onChange={(e) => setRules((r) => ({ ...r, trigger_close_enabled: e.target.checked ? "true" : "false" }))}
+                  />
+                  <strong>Fechamento automático por palavra-chave</strong>
+                </label>
+                <p style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 8px" }}>
+                  Quando o agente enviar uma mensagem citando uma destas palavras, a conversa é encerrada automaticamente.
+                </p>
+                <input
+                  value={rules["trigger_close_keywords"] ?? ""}
+                  onChange={(e) => setRules((r) => ({ ...r, trigger_close_keywords: e.target.value }))}
+                  placeholder="fechamento, fechado, fechar"
+                  className="settings-input"
+                  style={{ width: "100%", maxWidth: 420 }}
+                  disabled={rules["trigger_close_enabled"] !== "true"}
+                />
+                <span style={{ display: "block", marginTop: 4, color: "var(--muted)", fontSize: 12 }}>Separe por vírgula. Vazio = usa padrão (fechamento, fechado, fechar).</span>
+              </div>
+
+              <div className="rule-item">
+                <label className="rule-toggle">
+                  <input
+                    type="checkbox"
+                    checked={rules["trigger_value_enabled"] === "true"}
+                    onChange={(e) => setRules((r) => ({ ...r, trigger_value_enabled: e.target.checked ? "true" : "false" }))}
+                  />
+                  <strong>Valor automático por palavra-chave</strong>
+                </label>
+                <p style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 8px" }}>
+                  Quando o agente citar uma destas palavras junto a um número, o valor do lead é atualizado (ex: "valor 1.500,00").
+                </p>
+                <input
+                  value={rules["trigger_value_keywords"] ?? ""}
+                  onChange={(e) => setRules((r) => ({ ...r, trigger_value_keywords: e.target.value }))}
+                  placeholder="valor, preço, R$"
+                  className="settings-input"
+                  style={{ width: "100%", maxWidth: 420 }}
+                  disabled={rules["trigger_value_enabled"] !== "true"}
+                />
+                <span style={{ display: "block", marginTop: 4, color: "var(--muted)", fontSize: 12 }}>Separe por vírgula. Vazio = usa padrão (valor, preço, R$).</span>
+              </div>
+
               <button className="primary-button" type="submit">Salvar regras</button>
             </form>
           </div>
@@ -1887,8 +1937,18 @@ function ProspeccaoModal({
   function createNew() {
     setSelected(null);
     setIsNew(true);
-    setName(query);
-    setPhone("");
+    const q = query.trim();
+    // Se a busca parece um telefone (só dígitos/símbolos de fone, 8+ dígitos),
+    // joga no campo telefone; senão usa como nome do contato.
+    const digits = q.replace(/\D/g, "");
+    const looksPhone = /^[+()\d\s.\-]+$/.test(q) && digits.length >= 8;
+    if (looksPhone) {
+      setName("");
+      setPhone(q);
+    } else {
+      setName(q);
+      setPhone("");
+    }
     setCompany("");
     setEmail("");
     setStep("form");

@@ -119,6 +119,10 @@ export class ConversationsService {
 
     this.logger.log(`message created convId=${conversationId} status=${nextStatus}`);
 
+    // Gatilhos por palavra-chave (fechamento automático / setar valor) — configuráveis em Settings.
+    // Best-effort: falha aqui não bloqueia o envio da mensagem.
+    await this.applyMessageTriggers(conv.crmClientId, conversationId, conv.endCustomerId, body);
+
     // Fire-and-forget outbound delivery for WhatsApp conversations
     if (conv.channelType === "whatsapp") {
       const jid = conv.endCustomer?.whatsappJid ?? null;
@@ -514,5 +518,80 @@ export class ConversationsService {
   private async getClientSettings(crmClientId: string): Promise<Record<string, string>> {
     const rows = await this.prisma.setting.findMany({ where: { crmClientId } });
     return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+
+  // Remove acentos para casar palavras-chave sem depender de acentuação.
+  private stripAccents(s: string): string {
+    return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+
+  // Extrai o primeiro valor monetário do texto e converte para centavos.
+  // Aceita formatos BR ("R$ 1.500,00", "1.500", "1500,50") e simples ("1500", "1500.50").
+  private parseValueToCents(raw: string): number | null {
+    const cleaned = raw.replace(/r\$/gi, " ");
+    const m = cleaned.match(/\d[\d.,]*\d|\d/);
+    if (!m) return null;
+    const tok = m[0];
+    const hasComma = tok.includes(",");
+    const hasDot = tok.includes(".");
+    let normalized: string;
+    if (hasComma && hasDot) {
+      // "1.500,50" → ponto é milhar, vírgula é decimal
+      normalized = tok.replace(/\./g, "").replace(",", ".");
+    } else if (hasComma) {
+      // "1500,50" → vírgula decimal
+      normalized = tok.replace(",", ".");
+    } else if (hasDot) {
+      const parts = tok.split(".");
+      const last = parts[parts.length - 1];
+      // "1.500" / "1.500.000" (grupos de 3) = milhar; senão decimal ("1500.50")
+      normalized = parts.length > 1 && last.length === 3 ? parts.join("") : tok;
+    } else {
+      normalized = tok;
+    }
+    const value = parseFloat(normalized);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return Math.round(value * 100);
+  }
+
+  // Aplica gatilhos configurados em Settings sobre a mensagem do agente.
+  // Valor: se a mensagem cita palavra-chave de valor + um número, atualiza estimatedValueCents.
+  // Fechamento: se cita palavra-chave de fechamento, encerra a conversa (rodado por último).
+  private async applyMessageTriggers(
+    crmClientId: string,
+    conversationId: string,
+    endCustomerId: string,
+    body: string
+  ): Promise<void> {
+    try {
+      const settings = await this.getClientSettings(crmClientId);
+      const text = this.stripAccents(body.toLowerCase());
+
+      const matchAny = (csv: string | undefined, fallback: string[]): boolean => {
+        const list = (csv ?? "").split(",").map((k) => this.stripAccents(k.trim().toLowerCase())).filter(Boolean);
+        const keywords = list.length > 0 ? list : fallback;
+        return keywords.some((k) => text.includes(k));
+      };
+
+      // Valor
+      if (settings["trigger_value_enabled"] === "true" && matchAny(settings["trigger_value_keywords"], ["valor", "preco", "preço", "r$"])) {
+        const cents = this.parseValueToCents(body);
+        if (cents != null) {
+          await this.prisma.endCustomer.update({ where: { id: endCustomerId }, data: { estimatedValueCents: cents } });
+          this.logger.log(`trigger valor: estimatedValueCents=${cents} customerId=${endCustomerId}`);
+        }
+      }
+
+      // Fechamento (por último — encerra a conversa)
+      if (settings["trigger_close_enabled"] === "true" && matchAny(settings["trigger_close_keywords"], ["fechamento", "fechado", "fechar"])) {
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { status: "closed", closedAt: new Date() }
+        });
+        this.logger.log(`trigger fechamento: conversa encerrada convId=${conversationId}`);
+      }
+    } catch (err) {
+      this.logger.error(`applyMessageTriggers falhou convId=${conversationId}: ${String(err)}`);
+    }
   }
 }
