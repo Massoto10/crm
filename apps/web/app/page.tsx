@@ -1340,7 +1340,7 @@ function ChatsView({
 }
 
 function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null }) {
-  type SettingsTab = "departments" | "agents" | "quickMessages" | "leadStatuses" | "leadSources" | "rules" | "whatsapp";
+  type SettingsTab = "departments" | "agents" | "quickMessages" | "leadStatuses" | "leadSources" | "rules" | "whatsapp" | "danger";
   const { toasts, toast } = useToast();
   const [tab, setTab] = useState<SettingsTab>("departments");
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -1366,6 +1366,8 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
   const [srcName, setSrcName] = useState("");
   const [srcColor, setSrcColor] = useState("#d62976");
   const [srcCode, setSrcCode] = useState("");
+  const [clearConfirm, setClearConfirm] = useState("");
+  const [clearing, setClearing] = useState(false);
   const [waStatus, setWaStatus] = useState<"connected" | "connecting" | "disconnected">("disconnected");
   const [waQr, setWaQr] = useState<string | null>(null);
   const [waLoading, setWaLoading] = useState(false);
@@ -1586,6 +1588,22 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     } catch (err) { console.error("[removeSrc]", err); toast("Erro ao remover origem", "error"); }
   }
 
+  async function clearAllChats() {
+    if (clearConfirm !== "confirmar" || clearing) return;
+    setClearing(true);
+    try {
+      const res = await apiFetch(`${apiUrl}/api/conversations/all`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "confirmar" })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as { conversations: number };
+      toast(`${d.conversations} conversa(s) apagada(s). Dashboard zerado.`, "success");
+      setClearConfirm("");
+    } catch (err) { console.error("[clearAllChats]", err); toast("Erro ao limpar chats", "error"); }
+    finally { setClearing(false); }
+  }
+
   async function saveRules(e: FormEvent) {
     e.preventDefault();
     if (!firstCrmClientId) return;
@@ -1603,7 +1621,8 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     { id: "leadStatuses", label: "Status de Lead" },
     { id: "leadSources", label: "Origens" },
     { id: "rules", label: "Regras" },
-    { id: "whatsapp", label: "WhatsApp" }
+    { id: "whatsapp", label: "WhatsApp" },
+    { id: "danger", label: "Zona de risco" }
   ];
 
   return (
@@ -1931,6 +1950,38 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
 
               <button className="primary-button" type="submit">Salvar regras</button>
             </form>
+          </div>
+        )}
+
+        {tab === "danger" && (
+          <div className="settings-section">
+            <h2>Zona de risco</h2>
+            <div className="danger-zone">
+              <h3 style={{ marginTop: 0 }}>Limpar todos os chats</h3>
+              <p style={{ color: "var(--muted)", fontSize: 13 }}>
+                Apaga <strong>todas as conversas, mensagens e agendamentos</strong> desta conta e
+                <strong> zera o dashboard</strong>. Contatos, etiquetas e configurações NÃO são afetados.
+                <br />Esta ação é <strong>irreversível</strong>.
+              </p>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 700, margin: "12px 0 4px" }}>
+                Digite <code>confirmar</code> para habilitar:
+              </label>
+              <input
+                value={clearConfirm}
+                onChange={(e) => setClearConfirm(e.target.value)}
+                placeholder="confirmar"
+                className="settings-input"
+                style={{ maxWidth: 240, display: "block", marginBottom: 12 }}
+              />
+              <button
+                type="button"
+                className="danger-btn"
+                disabled={clearConfirm !== "confirmar" || clearing}
+                onClick={clearAllChats}
+              >
+                {clearing ? "Apagando..." : "Apagar todos os chats"}
+              </button>
+            </div>
           </div>
         )}
       </div>

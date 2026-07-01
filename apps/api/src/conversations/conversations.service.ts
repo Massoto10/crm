@@ -235,6 +235,23 @@ export class ConversationsService {
     return lidDigits && phone === lidDigits ? jid : phone ?? jid;
   }
 
+  // Zona de risco (admin): apaga TODAS as conversas + mensagens + agendamentos da org.
+  // Zera o dashboard (métricas derivam das conversas). Não mexe em contatos/config.
+  async clearAllChats(crmClientId: string) {
+    this.logger.warn(`clearAllChats crmClientId=${crmClientId} — apagando todas as conversas`);
+    try {
+      const [sched, convs] = await this.prisma.$transaction([
+        this.prisma.scheduledMessage.deleteMany({ where: { crmClientId } }),
+        this.prisma.conversation.deleteMany({ where: { crmClientId } }) // mensagens caem por cascade
+      ]);
+      this.logger.warn(`clearAllChats ok crmClientId=${crmClientId} conversas=${convs.count} agendamentos=${sched.count}`);
+      return { conversations: convs.count, scheduled: sched.count };
+    } catch (err) {
+      this.logger.error(`clearAllChats falhou crmClientId=${crmClientId}: ${String(err)}`);
+      throw err;
+    }
+  }
+
   async close(id: string) {
     assertFound(await this.prisma.conversation.findUnique({ where: { id }, select: { id: true } }), "Conversa");
     const result = await this.prisma.conversation.update({

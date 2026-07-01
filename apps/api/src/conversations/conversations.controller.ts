@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { ChannelType } from "@prisma/client";
-import { CurrentUser, JwtPayload, RequireView } from "../auth/decorators";
+import { CurrentUser, JwtPayload, RequireView, Roles } from "../auth/decorators";
 import { ConversationsService } from "./conversations.service";
 import { InitiateConversationDto } from "./dto/initiate-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
@@ -80,5 +80,13 @@ export class ConversationsController {
   @Put(":id/department")
   setDepartment(@Param("id") id: string, @Body() body: SetDepartmentDto) {
     return this.conversationsService.setDepartment(id, body.departmentId);
+  }
+
+  // Zona de risco: apaga TODAS as conversas da org. Admin only + exige confirm="confirmar".
+  @Delete("all")
+  @Roles("admin")
+  clearAll(@CurrentUser() user: JwtPayload, @Body() body: { confirm?: string }) {
+    if (body?.confirm !== "confirmar") throw new BadRequestException('Digite "confirmar" para confirmar a exclusão');
+    return this.conversationsService.clearAllChats(user.crmClientId);
   }
 }
