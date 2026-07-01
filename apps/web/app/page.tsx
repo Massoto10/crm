@@ -1369,6 +1369,9 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
   const [waStatus, setWaStatus] = useState<"connected" | "connecting" | "disconnected">("disconnected");
   const [waQr, setWaQr] = useState<string | null>(null);
   const [waLoading, setWaLoading] = useState(false);
+  const [waMethod, setWaMethod] = useState<"qr" | "code">("qr");
+  const [waPhone, setWaPhone] = useState("");
+  const [waPairingCode, setWaPairingCode] = useState<string | null>(null);
   const waPollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -1386,32 +1389,58 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
       .catch(() => setWaStatus("disconnected"));
   }
 
+  // Poller de status compartilhado entre QR e código de pareamento.
+  // Atualiza QR (quando aplicável) e para ao conectar.
+  function startWaPoller(crmId: string) {
+    if (waPollerRef.current) { clearInterval(waPollerRef.current); waPollerRef.current = null; }
+    setWaStatus("connecting");
+    let tries = 0;
+    waPollerRef.current = setInterval(() => {
+      tries++;
+      apiFetch(`${apiUrl}/api/whatsapp/${crmId}/status`)
+        .then((r) => r.json() as Promise<{ status: string; qr: string | null }>)
+        .then((s) => {
+          setWaStatus(s.status as typeof waStatus);
+          if (s.qr) setWaQr(s.qr);
+          if (s.status === "connected") {
+            setWaQr(null); setWaPairingCode(null);
+            clearInterval(waPollerRef.current!); waPollerRef.current = null;
+          }
+        })
+        .catch(() => null);
+      if (tries >= 60) { clearInterval(waPollerRef.current!); waPollerRef.current = null; }
+    }, 2000);
+  }
+
   async function connectWa() {
     if (!firstCrmClientId) return;
-    if (waPollerRef.current) { clearInterval(waPollerRef.current); waPollerRef.current = null; }
-    setWaLoading(true); setWaQr(null);
+    setWaLoading(true); setWaQr(null); setWaPairingCode(null);
     try {
       const res = await apiFetch(`${apiUrl}/api/whatsapp/${firstCrmClientId}/connect`, { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setWaStatus("connecting");
-      let tries = 0;
-      waPollerRef.current = setInterval(() => {
-        tries++;
-        apiFetch(`${apiUrl}/api/whatsapp/${firstCrmClientId}/status`)
-          .then((r) => r.json() as Promise<{ status: string; qr: string | null }>)
-          .then((s) => {
-            setWaStatus(s.status as typeof waStatus);
-            if (s.qr) setWaQr(s.qr);
-            if (s.status === "connected") {
-              setWaQr(null);
-              clearInterval(waPollerRef.current!); waPollerRef.current = null;
-            }
-          })
-          .catch(() => null);
-        if (tries >= 60) { clearInterval(waPollerRef.current!); waPollerRef.current = null; }
-      }, 2000);
+      startWaPoller(firstCrmClientId);
     } catch (err) {
       console.error("[connectWa]", err); toast("Erro ao conectar WhatsApp", "error");
+    } finally { setWaLoading(false); }
+  }
+
+  async function connectWaCode() {
+    if (!firstCrmClientId) return;
+    if (!waPhone.trim()) { toast("Informe o número com DDD", "error"); return; }
+    setWaLoading(true); setWaQr(null); setWaPairingCode(null);
+    try {
+      const res = await apiFetch(`${apiUrl}/api/whatsapp/${firstCrmClientId}/connect-code`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: waPhone.trim() })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { pairingCode: string | null; alreadyConnected?: boolean };
+      if (data.alreadyConnected) { setWaStatus("connected"); toast("WhatsApp já conectado", "success"); return; }
+      if (!data.pairingCode) { toast("Não foi possível gerar o código. Tente novamente.", "error"); return; }
+      setWaPairingCode(data.pairingCode);
+      startWaPoller(firstCrmClientId);
+    } catch (err) {
+      console.error("[connectWaCode]", err); toast("Erro ao gerar código de pareamento", "error");
     } finally { setWaLoading(false); }
   }
 
@@ -1764,21 +1793,53 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
                 </span>
               </div>
               {waStatus !== "connected" && (
-                <button className="primary-button" type="button" onClick={connectWa} disabled={waLoading}>
-                  {waLoading ? "Conectando..." : "Conectar WhatsApp"}
-                </button>
+                <>
+                  <div className="wa-method-tabs" role="tablist">
+                    <button type="button" role="tab" className={`wa-method-tab ${waMethod === "qr" ? "active" : ""}`} onClick={() => setWaMethod("qr")}>QR Code</button>
+                    <button type="button" role="tab" className={`wa-method-tab ${waMethod === "code" ? "active" : ""}`} onClick={() => setWaMethod("code")}>Código de telefone</button>
+                  </div>
+
+                  {waMethod === "qr" && (
+                    <button className="primary-button" type="button" onClick={connectWa} disabled={waLoading}>
+                      {waLoading ? "Conectando..." : "Conectar via QR"}
+                    </button>
+                  )}
+
+                  {waMethod === "code" && (
+                    <div className="wa-code-form">
+                      <input
+                        className="settings-input"
+                        value={waPhone}
+                        onChange={(e) => setWaPhone(e.target.value)}
+                        placeholder="Número com DDD (ex: 11 99999-9999)"
+                        style={{ maxWidth: 320 }}
+                      />
+                      <button className="primary-button" type="button" onClick={connectWaCode} disabled={waLoading}>
+                        {waLoading ? "Gerando..." : "Gerar código"}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
               {waStatus === "connected" && (
                 <button className="danger-btn" type="button" onClick={disconnectWa} disabled={waLoading}>
                   Desconectar
                 </button>
               )}
-              {waQr && (
+              {waMethod === "qr" && waQr && (
                 <div className="wa-qr-wrapper">
                   <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>
                     Abra o WhatsApp no celular → Aparelhos conectados → Conectar aparelho → escaneie o QR abaixo:
                   </p>
                   <img src={waQr} alt="QR Code WhatsApp" className="wa-qr-img" />
+                </div>
+              )}
+              {waMethod === "code" && waPairingCode && (
+                <div className="wa-code-wrapper">
+                  <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>
+                    No celular: WhatsApp → Aparelhos conectados → Conectar aparelho → <strong>Conectar com número de telefone</strong>. Digite o código:
+                  </p>
+                  <div className="wa-pairing-code">{waPairingCode}</div>
                 </div>
               )}
             </div>

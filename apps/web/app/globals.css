@@ -2043,6 +2043,61 @@ h1 {
   display: block;
 }
 
+.wa-method-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.wa-method-tab {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  transition: background 0.14s, color 0.14s;
+}
+
+.wa-method-tab.active {
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(38, 55, 70, 0.1);
+}
+
+.wa-code-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.wa-code-wrapper {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.wa-pairing-code {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  color: var(--accent-strong);
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  background: var(--panel);
+  border: 1.5px dashed var(--accent);
+  border-radius: 10px;
+  padding: 14px 18px;
+  text-align: center;
+  user-select: all;
+}
+
 
 .inline-edit-input {
   width: 100%;

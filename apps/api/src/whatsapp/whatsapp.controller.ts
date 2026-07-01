@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Logger, Param, Post, Delete, Query, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Logger, Param, Post, Delete, Query, UnauthorizedException } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
 import { Public, Roles } from "../auth/decorators";
 import { PrismaService } from "../prisma/prisma.service";
@@ -51,11 +51,9 @@ export class WhatsappController {
     };
   }
 
-  @Post(":crmClientId/connect")
-  @Roles("admin")
-  async connect(@Param("crmClientId") crmClientId: string) {
-    const instanceName = `crm-${crmClientId}`;
-
+  // Garante uma instância nova (ou reaproveita a já conectada) antes de connect/pareamento.
+  // Retorna "open" se já estava conectada, "fresh" se criou/recriou a sessão.
+  private async prepareInstance(crmClientId: string, instanceName: string): Promise<"open" | "fresh"> {
     await this.prisma.setting.upsert({
       where: { crmClientId_key: { crmClientId, key: "wa_instance_name" } },
       create: { crmClientId, key: "wa_instance_name", value: instanceName },
@@ -67,11 +65,7 @@ export class WhatsappController {
 
     // Check current instance state — avoid recreating a connecting instance
     const current = await this.whatsapp.getInstanceStatus(instanceName);
-
-    if (current?.state === "open") {
-      // Already connected — nothing to do
-      return { instanceName, qr: null };
-    }
+    if (current?.state === "open") return "open";
 
     if (current) {
       // Exists but not connected — delete stale session then recreate fresh
@@ -80,6 +74,17 @@ export class WhatsappController {
     }
 
     await this.whatsapp.createInstance(instanceName).catch((e) => this.logger.warn(`createInstance falhou name=${instanceName}: ${e}`));
+    return "fresh";
+  }
+
+  @Post(":crmClientId/connect")
+  @Roles("admin")
+  async connect(@Param("crmClientId") crmClientId: string) {
+    const instanceName = `crm-${crmClientId}`;
+
+    if ((await this.prepareInstance(crmClientId, instanceName)) === "open") {
+      return { instanceName, qr: null };
+    }
 
     // v1: QR available via REST immediately after create; also refreshed via qrcode.updated webhook
     await new Promise((r) => setTimeout(r, 3000));
@@ -96,6 +101,31 @@ export class WhatsappController {
     }
 
     return { instanceName, qr: qrData?.base64 ?? null };
+  }
+
+  // Login por código de pareamento (alternativa ao QR). Recebe o número do
+  // aparelho e devolve um código pra digitar no WhatsApp: Aparelhos conectados
+  // → Conectar com número de telefone.
+  @Post(":crmClientId/connect-code")
+  @Roles("admin")
+  async connectWithCode(@Param("crmClientId") crmClientId: string, @Body() body: { phone?: string }) {
+    const phone = body?.phone?.trim();
+    if (!phone) throw new BadRequestException("Número de telefone é obrigatório");
+
+    const instanceName = `crm-${crmClientId}`;
+
+    if ((await this.prepareInstance(crmClientId, instanceName)) === "open") {
+      return { instanceName, pairingCode: null, alreadyConnected: true };
+    }
+
+    // Aguarda a instância subir antes de pedir o código de pareamento
+    await new Promise((r) => setTimeout(r, 3000));
+    const { pairingCode } = await this.whatsapp.requestPairingCode(instanceName, phone).catch((e) => {
+      this.logger.warn(`requestPairingCode falhou name=${instanceName}: ${e}`);
+      return { pairingCode: null };
+    });
+
+    return { instanceName, pairingCode };
   }
 
   @Get(":crmClientId/qr")

@@ -52,6 +52,18 @@ export class WhatsappService {
     return data.base64 ? { base64: data.base64 } : null;
   }
 
+  // Login por código de pareamento: passa o número no connect e o Evolution
+  // devolve um código (ex: "ABCD-EFGH") pra digitar no WhatsApp do celular.
+  async requestPairingCode(instanceName: string, phone: string): Promise<{ pairingCode: string | null }> {
+    const number = normalizeBrazilPhone(phone);
+    this.logger.log(`requestPairingCode name=${instanceName} number=${number}`);
+    const data = await this.req<{ pairingCode?: string; code?: string }>(
+      "GET",
+      `/instance/connect/${instanceName}?number=${number}`
+    );
+    return { pairingCode: data.pairingCode ?? data.code ?? null };
+  }
+
   async getInstanceStatus(instanceName: string): Promise<{ state: string } | null> {
     try {
       const data = await this.req<{ instance: { state: string } }>(
