@@ -37,12 +37,15 @@ export class WhatsappService {
     return res.json() as Promise<T>;
   }
 
-  async createInstance(instanceName: string): Promise<EvoInstance> {
-    this.logger.log(`createInstance name=${instanceName}`);
+  async createInstance(instanceName: string, number?: string): Promise<EvoInstance> {
+    const num = number ? normalizeBrazilPhone(number) : undefined;
+    this.logger.log(`createInstance name=${instanceName}${num ? ` number=${num}` : ""}`);
+    // Passar `number` na criação faz o Evolution devolver o pairingCode no connect.
     return this.req("POST", "/instance/create", {
       instanceName,
       qrcode: true,
-      integration: "WHATSAPP-BAILEYS"
+      integration: "WHATSAPP-BAILEYS",
+      ...(num ? { number: num } : {})
     });
   }
 
@@ -61,7 +64,8 @@ export class WhatsappService {
       "GET",
       `/instance/connect/${instanceName}?number=${number}`
     );
-    return { pairingCode: data.pairingCode ?? data.code ?? null };
+    // NUNCA cair no `code` (isso é o QR). Só o pairingCode serve pra tela "Enter code".
+    return { pairingCode: data.pairingCode ?? null };
   }
 
   async getInstanceStatus(instanceName: string): Promise<{ state: string } | null> {

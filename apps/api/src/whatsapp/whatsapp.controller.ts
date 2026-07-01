@@ -53,7 +53,7 @@ export class WhatsappController {
 
   // Garante uma instância nova (ou reaproveita a já conectada) antes de connect/pareamento.
   // Retorna "open" se já estava conectada, "fresh" se criou/recriou a sessão.
-  private async prepareInstance(crmClientId: string, instanceName: string): Promise<"open" | "fresh"> {
+  private async prepareInstance(crmClientId: string, instanceName: string, number?: string): Promise<"open" | "fresh"> {
     await this.prisma.setting.upsert({
       where: { crmClientId_key: { crmClientId, key: "wa_instance_name" } },
       create: { crmClientId, key: "wa_instance_name", value: instanceName },
@@ -67,13 +67,14 @@ export class WhatsappController {
     const current = await this.whatsapp.getInstanceStatus(instanceName);
     if (current?.state === "open") return "open";
 
-    if (current) {
-      // Exists but not connected — delete stale session then recreate fresh
+    // Para pareamento por código o Evolution só devolve o pairingCode quando a
+    // instância é criada COM o número, então recriamos sempre nesse fluxo.
+    if (current || number) {
       await this.whatsapp.deleteInstance(instanceName).catch((e) => this.logger.warn(`deleteInstance falhou name=${instanceName}: ${e}`));
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    await this.whatsapp.createInstance(instanceName).catch((e) => this.logger.warn(`createInstance falhou name=${instanceName}: ${e}`));
+    await this.whatsapp.createInstance(instanceName, number).catch((e) => this.logger.warn(`createInstance falhou name=${instanceName}: ${e}`));
     return "fresh";
   }
 
@@ -114,7 +115,7 @@ export class WhatsappController {
 
     const instanceName = `crm-${crmClientId}`;
 
-    if ((await this.prepareInstance(crmClientId, instanceName)) === "open") {
+    if ((await this.prepareInstance(crmClientId, instanceName, phone)) === "open") {
       return { instanceName, pairingCode: null, alreadyConnected: true };
     }
 
