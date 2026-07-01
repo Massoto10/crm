@@ -1368,6 +1368,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
   const [srcCode, setSrcCode] = useState("");
   const [clearConfirm, setClearConfirm] = useState("");
   const [clearing, setClearing] = useState(false);
+  const [waSyncing, setWaSyncing] = useState(false);
   const [waStatus, setWaStatus] = useState<"connected" | "connecting" | "disconnected">("disconnected");
   const [waQr, setWaQr] = useState<string | null>(null);
   const [waLoading, setWaLoading] = useState(false);
@@ -1389,6 +1390,20 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
         if (d.qr) setWaQr(d.qr);
       })
       .catch(() => setWaStatus("disconnected"));
+  }
+
+  async function syncWaStatus() {
+    if (!firstCrmClientId || waSyncing) return;
+    setWaSyncing(true);
+    try {
+      const res = await apiFetch(`${apiUrl}/api/whatsapp/${firstCrmClientId}/status`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as { status: string; qr: string | null };
+      setWaStatus(d.status as typeof waStatus);
+      setWaQr(d.qr ?? null);
+      toast(`Sincronizado: ${d.status === "connected" ? "conectado" : d.status === "connecting" ? "aguardando" : "desconectado"}`, "success");
+    } catch (err) { console.error("[syncWaStatus]", err); toast("Erro ao sincronizar", "error"); }
+    finally { setWaSyncing(false); }
   }
 
   // Poller de status compartilhado entre QR e código de pareamento.
@@ -1810,6 +1825,9 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
                 <span>
                   {waStatus === "connected" ? "Conectado" : waStatus === "connecting" ? "Aguardando escaneamento..." : "Desconectado"}
                 </span>
+                <button type="button" className="ghost-btn" style={{ marginLeft: "auto" }} onClick={syncWaStatus} disabled={waSyncing} title="Revalidar status no servidor">
+                  {waSyncing ? "Sincronizando..." : "↻ Sincronizar"}
+                </button>
               </div>
               {waStatus !== "connected" && (
                 <>

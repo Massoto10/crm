@@ -1403,6 +1403,17 @@ h1 {
   color: #fff;
 }
 
+.danger-btn:disabled {
+  border-color: var(--line);
+  background: #e9edf0;
+  color: #9aa6ad;
+  cursor: not-allowed;
+}
+.danger-btn:disabled:hover {
+  background: #e9edf0;
+  color: #9aa6ad;
+}
+
 .danger-zone {
   border: 1px solid #e8c4c4;
   border-radius: 10px;
