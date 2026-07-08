@@ -248,7 +248,9 @@ export default function HomePage() {
     async function load() {
       setIsLoading(true);
       try {
-        const params = new URLSearchParams({ chatStatus, channel, crmClientId });
+        // Board de Clientes mostra todo lead (qualquer status de chat); Chats respeita a aba.
+        const params = new URLSearchParams({ channel, crmClientId });
+        if (view !== "clients") params.set("chatStatus", chatStatus);
         if (filterDeptId) params.set("departmentId", filterDeptId);
         if (filterSourceId) params.set("leadSourceId", filterSourceId);
         const res = await apiFetch(`${apiUrl}/api/conversations?${params}`);
@@ -269,7 +271,7 @@ export default function HomePage() {
       setIsLoading(false);
     }
     load();
-  }, [channel, chatStatus, filterDeptId, filterSourceId, firstCrmClientId]);
+  }, [view, channel, chatStatus, filterDeptId, filterSourceId, firstCrmClientId]);
 
   useEffect(() => {
     if (view !== "chats" || !firstCrmClientId) return;
