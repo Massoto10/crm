@@ -663,15 +663,13 @@ export default function HomePage() {
             setShowProspeccaoModal(false);
             setView("chats");
             pendingSelectRef.current = created.id;
+            // Ajusta aba/canal pra a conversa nova ficar visível e sempre refaz o fetch
+            // (a lista busca todos os status; trocar de aba não dispara mais refetch).
             const target: ChatStatus =
               created.status === "pending" ? "pending" : created.status === "closed" ? "closed" : "active";
-            const needsFilterChange = target !== chatStatus || created.channelType !== channel;
-            if (needsFilterChange) {
-              setChannel(created.channelType);
-              setChatStatus(target);
-            } else {
-              refreshConversations();
-            }
+            setChannel(created.channelType);
+            setChatStatus(target);
+            refreshConversations();
           }}
           onError={(msg) => toast(msg, "error")}
         />
