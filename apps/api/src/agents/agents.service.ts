@@ -26,11 +26,25 @@ export class AgentsService {
   }
 
   async create(data: { crmClientId: string; name: string; email: string; role?: UserRole; departmentId?: string }) {
-    this.logger.log(`create agent crmClientId=${data.crmClientId} email=${data.email}`);
+    const email = data.email.toLowerCase().trim();
+    this.logger.log(`create agent crmClientId=${data.crmClientId} email=${email}`);
     const tempPassword = this.genPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+    // O unique é [crmClientId, email] e o "Remover" só desativa (linha permanece).
+    // Se já existir (mesmo inativo), reativa e sobrescreve em vez de estourar P2002.
+    const existing = await this.prisma.agent.findFirst({ where: { crmClientId: data.crmClientId, email } });
+    if (existing) {
+      const agent = await this.prisma.agent.update({
+        where: { id: existing.id },
+        data: { name: data.name, role: data.role ?? "agent", departmentId: data.departmentId ?? null, isActive: true, passwordHash },
+        include: { department: true }
+      });
+      return { ...agent, tempPassword };
+    }
+
     const agent = await this.prisma.agent.create({
-      data: { crmClientId: data.crmClientId, name: data.name, email: data.email.toLowerCase().trim(), role: data.role ?? "agent", departmentId: data.departmentId, passwordHash },
+      data: { crmClientId: data.crmClientId, name: data.name, email, role: data.role ?? "agent", departmentId: data.departmentId, passwordHash },
       include: { department: true }
     });
     // tempPassword vai UMA vez pro admin — nunca é persistido em claro nem exibido de novo.
