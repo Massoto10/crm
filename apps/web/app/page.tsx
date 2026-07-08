@@ -170,7 +170,7 @@ export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<JwtUser | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [channel, setChannel] = useState<Channel>("whatsapp");
-  const [chatStatus, setChatStatus] = useState<ChatStatus>("active");
+  const [chatStatus, setChatStatus] = useState<ChatStatus>("pending");
   const [filterDeptId, setFilterDeptId] = useState<string>("");
   const [filterSourceId, setFilterSourceId] = useState<string>("");
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
@@ -248,9 +248,8 @@ export default function HomePage() {
     async function load() {
       setIsLoading(true);
       try {
-        // Board de Clientes mostra todo lead (qualquer status de chat); Chats respeita a aba.
+        // Busca todas as convs (qualquer status); Chats filtra por aba client-side, board mostra tudo.
         const params = new URLSearchParams({ channel, crmClientId });
-        if (view !== "clients") params.set("chatStatus", chatStatus);
         if (filterDeptId) params.set("departmentId", filterDeptId);
         if (filterSourceId) params.set("leadSourceId", filterSourceId);
         const res = await apiFetch(`${apiUrl}/api/conversations?${params}`);
@@ -271,7 +270,7 @@ export default function HomePage() {
       setIsLoading(false);
     }
     load();
-  }, [view, channel, chatStatus, filterDeptId, filterSourceId, firstCrmClientId]);
+  }, [view, channel, filterDeptId, filterSourceId, firstCrmClientId]);
 
   useEffect(() => {
     if (view !== "chats" || !firstCrmClientId) return;
@@ -319,7 +318,7 @@ export default function HomePage() {
     if (view !== "chats" || !firstCrmClientId) return;
     const crmClientId = firstCrmClientId;
     const id = setInterval(() => {
-      const params = new URLSearchParams({ chatStatus, channel, crmClientId });
+      const params = new URLSearchParams({ channel, crmClientId });
       if (filterDeptId) params.set("departmentId", filterDeptId);
       if (filterSourceId) params.set("leadSourceId", filterSourceId);
       apiFetch(`${apiUrl}/api/conversations?${params}`)
@@ -331,7 +330,7 @@ export default function HomePage() {
         .catch((err) => console.error("[poll list] falhou:", err));
     }, 8000);
     return () => clearInterval(id);
-  }, [view, chatStatus, channel, filterDeptId, filterSourceId, firstCrmClientId]);
+  }, [view, channel, filterDeptId, filterSourceId, firstCrmClientId]);
 
   const selected = useMemo(
     () => detail ?? conversations.find((c) => c.id === selectedId) ?? null,
@@ -343,7 +342,7 @@ export default function HomePage() {
     if (!firstCrmClientId) return;
     const crmClientId = firstCrmClientId;
     setSelectedId(null);
-    const params = new URLSearchParams({ chatStatus, channel, crmClientId });
+    const params = new URLSearchParams({ channel, crmClientId });
     if (filterDeptId) params.set("departmentId", filterDeptId);
     if (filterSourceId) params.set("leadSourceId", filterSourceId);
     apiFetch(`${apiUrl}/api/conversations?${params}`)
@@ -976,6 +975,11 @@ function ChatsView({
   const pending = conversations.filter((c) => c.status === "pending").length;
   const active = conversations.filter((c) => ["open", "waiting_customer", "waiting_agent"].includes(c.status)).length;
   const closed = conversations.filter((c) => c.status === "closed").length;
+  // Lista da inbox filtrada pela aba selecionada (dados já vêm com todos os status).
+  const visible = conversations.filter((c) =>
+    chatStatus === "pending" ? c.status === "pending"
+      : chatStatus === "closed" ? c.status === "closed"
+        : ["open", "waiting_customer", "waiting_agent"].includes(c.status));
 
   const threadRef = useRef<HTMLDivElement>(null);
   const [editingEstimatedValue, setEditingEstimatedValue] = useState(false);
@@ -1058,10 +1062,10 @@ function ChatsView({
           <div className="conversation-list">
             {isLoading ? (
               <div className="empty-state">Carregando...</div>
-            ) : conversations.length === 0 ? (
+            ) : visible.length === 0 ? (
               <div className="empty-state">Sem conversas neste filtro.</div>
             ) : (
-              conversations.map((conv) => (
+              visible.map((conv) => (
                 <button key={conv.id} type="button" className={`conversation-card ${conv.id === selectedId ? "active" : ""}`} onClick={() => onSelectConversation(conv.id)}>
                   <div className="avatar">{initials(conv.endCustomer.fullName)}</div>
                   <div className="conversation-main">
