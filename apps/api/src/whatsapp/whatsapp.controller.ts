@@ -151,6 +151,12 @@ export class WhatsappController {
         update: { value: "disconnected" }
       });
     }
-    return { ok: true };
+    // Ao desconectar, zera as conversas/mensagens do WhatsApp do número antigo
+    // (mensagens caem por cascade). Não mexe em Instagram nem em contatos.
+    const wiped = await this.prisma.conversation.deleteMany({
+      where: { crmClientId, channelType: "whatsapp" }
+    });
+    this.logger.warn(`disconnect wipe crmClientId=${crmClientId} conversas_whatsapp=${wiped.count}`);
+    return { ok: true, wipedConversations: wiped.count };
   }
 }
