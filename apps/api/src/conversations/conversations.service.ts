@@ -373,6 +373,25 @@ export class ConversationsService {
       });
     }
 
+    // Não duplica conversa pro mesmo contato: se já existe uma não-fechada nesse
+    // canal, reusa (envia a 1ª mensagem nela, se houver) em vez de criar outra.
+    const existingOpen = await this.prisma.conversation.findFirst({
+      where: { endCustomerId: customer.id, channelType, status: { not: "closed" } },
+      orderBy: { lastMessageAt: "desc" }
+    });
+    if (existingOpen) {
+      this.logger.log(`initiate reusa conversa aberta id=${existingOpen.id} customerId=${customer.id}`);
+      if (firstMessage?.trim()) {
+        try {
+          await this.createAgentMessage(existingOpen.id, firstMessage.trim(), "Agente");
+        } catch (err) {
+          this.logger.error(`firstMessage (reuse) falhou convId=${existingOpen.id}: ${String(err)}`);
+        }
+      }
+      const fresh = await this.prisma.conversation.findUnique({ where: { id: existingOpen.id }, include: convInclude });
+      if (fresh) return fresh;
+    }
+
     const firstPreview = firstMessage?.trim() ?? "Nova conversa iniciada";
     const conv = await this.prisma.conversation.create({
       data: {
