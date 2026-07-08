@@ -26,6 +26,12 @@ export class AgentsController {
     return this.agentsService.update(id, body);
   }
 
+  @Post(":id/reset-password")
+  @Roles("admin")
+  resetPassword(@Param("id") id: string, @Body() body: { password?: string }) {
+    return this.agentsService.resetPassword(id, body?.password);
+  }
+
   @Delete(":id")
   @Roles("admin")
   remove(@Param("id") id: string) {

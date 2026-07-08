@@ -1387,6 +1387,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
   const [stageName, setStageName] = useState("");
   const [stageColor, setStageColor] = useState("#206d6f");
   const [stageHint, setStageHint] = useState("");
+  const [credInfo, setCredInfo] = useState<{ name: string; email: string; password: string } | null>(null);
   const [clearConfirm, setClearConfirm] = useState("");
   const [clearing, setClearing] = useState(false);
   const [waSyncing, setWaSyncing] = useState(false);
@@ -1553,6 +1554,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
       const res = await apiFetch(`${apiUrl}/api/agents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crmClientId: firstCrmClientId, name: agentName, email: agentEmail, role: agentRole, departmentId: agentDept || undefined }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const a = await res.json(); setAgents((prev) => [...prev, a]); setAgentName(""); setAgentEmail("");
+      if (a.tempPassword) setCredInfo({ name: a.name, email: a.email, password: a.tempPassword });
       toast("Agente criado", "success");
     } catch (err) { console.error("[addAgent]", err); toast("Erro ao criar agente", "error"); }
   }
@@ -1563,6 +1565,18 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setAgents((prev) => prev.filter((a) => a.id !== id));
     } catch (err) { console.error("[removeAgent]", err); toast("Erro ao remover agente", "error"); }
+  }
+
+  async function resetAgentPassword(a: AgentUser) {
+    try {
+      const res = await apiFetch(`${apiUrl}/api/agents/${a.id}/reset-password`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({})
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      setCredInfo({ name: a.name, email: a.email, password: d.tempPassword });
+      toast("Senha redefinida", "success");
+    } catch (err) { console.error("[resetAgentPassword]", err); toast("Erro ao redefinir senha", "error"); }
   }
 
   async function addQM(e: FormEvent) {
@@ -1775,7 +1789,10 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
                     <td>{a.email}</td>
                     <td>{a.department?.name ?? "-"}</td>
                     <td>{a.role === "admin" ? "Administrador" : "Usuario"}</td>
-                    <td><button type="button" className="danger-btn" onClick={() => removeAgent(a.id)}>Remover</button></td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      <button type="button" className="ghost-btn" onClick={() => resetAgentPassword(a)}>Redefinir senha</button>
+                      <button type="button" className="danger-btn" onClick={() => removeAgent(a.id)}>Remover</button>
+                    </td>
                   </tr>
                 ))}
                 {agents.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)" }}>Nenhum agente cadastrado.</td></tr>}
@@ -2093,6 +2110,25 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
           </div>
         )}
       </div>
+      {credInfo && (
+        <div className="modal-overlay" onClick={() => setCredInfo(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440, padding: 20 }}>
+            <h2 style={{ marginTop: 0 }}>Senha de acesso</h2>
+            <p style={{ color: "var(--muted)", fontSize: 13 }}>
+              Guarde e repasse agora — <strong>não será exibida de novo</strong>. Se perder, use "Redefinir senha".
+            </p>
+            <div style={{ background: "var(--surface-2, #f1f4f5)", borderRadius: 8, padding: 12, margin: "12px 0" }}>
+              <div style={{ fontSize: 13 }}><strong>{credInfo.name}</strong></div>
+              <div style={{ fontSize: 13, color: "var(--muted)" }}>{credInfo.email}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <code style={{ fontSize: 16, fontWeight: 700, letterSpacing: 1 }}>{credInfo.password}</code>
+                <button type="button" className="ghost-btn" onClick={() => { navigator.clipboard?.writeText(credInfo.password).then(() => toast("Senha copiada", "success")).catch(() => {}); }}>Copiar</button>
+              </div>
+            </div>
+            <button type="button" className="primary-button slim" onClick={() => setCredInfo(null)}>Fechar</button>
+          </div>
+        </div>
+      )}
       <ToastList toasts={toasts} />
     </>
   );
