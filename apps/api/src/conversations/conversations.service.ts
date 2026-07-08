@@ -27,6 +27,7 @@ interface InitiateDto {
   channelType: ChannelType;
   departmentId?: string;
   firstMessage?: string;
+  assignedAgentId?: string;
 }
 
 const convInclude = {
@@ -383,7 +384,9 @@ export class ConversationsService {
         slaStatus: "on_time",
         lastMessagePreview: firstPreview,
         lastMessageAt: new Date(),
-        departmentId: departmentId ?? null
+        departmentId: departmentId ?? null,
+        // Dono da conversa = quem criou. Só ele (escopo "own") e admins enxergam.
+        assignedAgentId: dto.assignedAgentId ?? null
       },
       include: convInclude
     });

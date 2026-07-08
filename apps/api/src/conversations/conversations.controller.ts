@@ -44,7 +44,9 @@ export class ConversationsController {
     return this.conversationsService.initiate({
       ...body,
       crmClientId: user.crmClientId,
-      firstMessage: body.firstMessage
+      firstMessage: body.firstMessage,
+      // Conversa criada manualmente pertence a quem a iniciou.
+      assignedAgentId: user.sub
     });
   }
 
