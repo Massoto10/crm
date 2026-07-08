@@ -657,7 +657,7 @@ export default function HomePage() {
 
       {showProspeccaoModal && (
         <ProspeccaoModal
-          departments={departments} firstCrmClientId={firstCrmClientId}
+          firstCrmClientId={firstCrmClientId}
           onClose={() => setShowProspeccaoModal(false)}
           onCreated={(created) => {
             setShowProspeccaoModal(false);
@@ -2139,9 +2139,9 @@ type ContactResult = {
 };
 
 function ProspeccaoModal({
-  departments, firstCrmClientId, onClose, onCreated, onError
+  firstCrmClientId, onClose, onCreated, onError
 }: {
-  departments: Department[]; firstCrmClientId: string | null;
+  firstCrmClientId: string | null;
   onClose: () => void; onCreated: (conv: Conversation) => void; onError: (msg: string) => void;
 }) {
   const [step, setStep] = useState<"search" | "form">("search");
@@ -2156,7 +2156,6 @@ function ProspeccaoModal({
   const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
   const [convChannel, setConvChannel] = useState<Channel>("whatsapp");
-  const [deptId, setDeptId] = useState("");
   const [firstMessage, setFirstMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -2213,9 +2212,9 @@ function ProspeccaoModal({
     if (!firstCrmClientId) return;
     setLoading(true);
     try {
+      // Departamento não é escolhido aqui — o backend usa o do usuário que cria.
       const body: Record<string, string | undefined> = {
         channelType: convChannel,
-        departmentId: deptId || undefined,
         firstMessage: firstMessage.trim() || undefined
       };
       if (selected) {
@@ -2362,13 +2361,6 @@ function ProspeccaoModal({
                     </button>
                   ))}
                 </div>
-              </label>
-              <label>
-                Departamento
-                <select value={deptId} onChange={(e) => setDeptId(e.target.value)}>
-                  <option value="">Nenhum</option>
-                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
               </label>
               <label>
                 Primeira mensagem <span style={{ color: "var(--muted)", fontWeight: 400 }}>(opcional)</span>

@@ -311,7 +311,16 @@ export class ConversationsService {
 
   async initiate(dto: InitiateDto) {
     const { crmClientId, channelType, firstMessage } = dto;
-    let { departmentId } = dto;
+    // Departamento da conversa = o do usuário que a criou (não é escolhido no formulário).
+    // A regra de retorno pós-fechamento abaixo pode sobrescrever.
+    let departmentId: string | null = null;
+    if (dto.assignedAgentId) {
+      const creator = await this.prisma.agent.findUnique({
+        where: { id: dto.assignedAgentId },
+        select: { departmentId: true }
+      });
+      departmentId = creator?.departmentId ?? null;
+    }
 
     // Normalize phone for WhatsApp to E.164-BR (55 + DDD + número) so it matches
     // what the webhook stores and is accepted by Evolution on outbound.
