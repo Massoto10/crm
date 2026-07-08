@@ -255,12 +255,24 @@ export class ConversationsService {
   }
 
   async close(id: string) {
-    assertFound(await this.prisma.conversation.findUnique({ where: { id }, select: { id: true } }), "Conversa");
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id },
+      select: { id: true, endCustomerId: true, crmClientId: true }
+    });
+    assertFound(conv, "Conversa");
     const result = await this.prisma.conversation.update({
       where: { id },
       data: { status: "closed", closedAt: new Date() }
     });
-    this.logger.log(`conversation closed id=${id}`);
+    // Ao encerrar, move o cliente para a última etapa do funil (coluna de fechado/finalizado).
+    const finalStage = await this.prisma.pipelineStage.findFirst({
+      where: { crmClientId: conv.crmClientId, isActive: true },
+      orderBy: { order: "desc" }
+    });
+    if (finalStage) {
+      await this.prisma.endCustomer.update({ where: { id: conv.endCustomerId }, data: { pipelineStageId: finalStage.id } });
+    }
+    this.logger.log(`conversation closed id=${id} movedStage=${finalStage?.id ?? "none"}`);
     return result;
   }
 

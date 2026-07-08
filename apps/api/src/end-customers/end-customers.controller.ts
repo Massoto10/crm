@@ -51,6 +51,11 @@ export class EndCustomersController {
     return this.svc.patch(id, body, user.crmClientId);
   }
 
+  @Delete(":id")
+  remove(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.svc.remove(id, user.crmClientId);
+  }
+
   @Post(":id/labels")
   addLabel(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: AddLabelDto) {
     return this.svc.addLabel(id, user.crmClientId, body.name, body.color ?? "#206d6f");

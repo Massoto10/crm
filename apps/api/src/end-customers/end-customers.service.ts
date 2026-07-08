@@ -105,6 +105,22 @@ export class EndCustomersService {
     return { ok: true };
   }
 
+  async remove(id: string, crmClientId: string) {
+    const customer = await this.prisma.endCustomer.findUnique({ where: { id }, select: { id: true, crmClientId: true } });
+    assertFound(customer, "Cliente");
+    if (customer.crmClientId !== crmClientId) throw new NotFoundException("Cliente não encontrado");
+    // Remove dependências e o cliente numa transação (mensagens caem por cascade da conversa).
+    await this.prisma.$transaction([
+      this.prisma.scheduledMessage.deleteMany({ where: { endCustomerId: id } }),
+      this.prisma.task.deleteMany({ where: { endCustomerId: id } }),
+      this.prisma.endCustomerLabel.deleteMany({ where: { endCustomerId: id } }),
+      this.prisma.conversation.deleteMany({ where: { endCustomerId: id } }),
+      this.prisma.endCustomer.delete({ where: { id } })
+    ]);
+    this.logger.warn(`removed endCustomer id=${id} crmClientId=${crmClientId}`);
+    return { ok: true };
+  }
+
   async patch(id: string, data: { estimatedValueCents?: number; assignedTo?: string | null; pipelineStageId?: string | null }, crmClientId: string) {
     this.logger.log(`patch endCustomerId=${id} crmClientId=${crmClientId}`);
     const customer = await this.prisma.endCustomer.findUnique({ where: { id }, select: { id: true, crmClientId: true } });

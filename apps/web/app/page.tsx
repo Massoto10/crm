@@ -552,6 +552,20 @@ export default function HomePage() {
     setShowQuickPicker(false);
   }
 
+  async function deleteClient(clientId: string) {
+    try {
+      const res = await apiFetch(`${apiUrl}/api/end-customers/${clientId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setClients((cur) => cur.filter((c) => c.id !== clientId));
+      setConversations((cur) => cur.filter((c) => c.endCustomer.id !== clientId));
+      setSelectedClientId(null);
+      toast("Cliente excluído", "success");
+    } catch (err) {
+      console.error("[deleteClient] falhou:", err);
+      toast("Erro ao excluir cliente", "error");
+    }
+  }
+
   async function moveClient(clientId: string, stageId: string) {
     setClients((cur) => cur.map((c) => (c.id === clientId ? { ...c, stageId } : c))); // otimista
     try {
@@ -626,7 +640,7 @@ export default function HomePage() {
           <ClientsView
             clients={clients} selectedClient={selectedClient} newLabel={newLabel}
             onAddLabel={addLabel} onChangeLabel={setNewLabel} onMoveClient={moveClient}
-            pipelineStages={pipelineStages}
+            pipelineStages={pipelineStages} onDeleteClient={deleteClient}
             onRemoveLabel={removeLabel} onSelectClient={setSelectedClientId}
             crmClientId={firstCrmClientId} canSchedule={canView("scheduling")}
             onNewConversation={() => setShowProspeccaoModal(true)}
@@ -843,12 +857,13 @@ function DashboardView({
 }
 
 function ClientsView({
-  clients, selectedClient, newLabel, onAddLabel, onChangeLabel, onMoveClient, pipelineStages, onRemoveLabel, onSelectClient,
+  clients, selectedClient, newLabel, onAddLabel, onChangeLabel, onMoveClient, pipelineStages, onDeleteClient, onRemoveLabel, onSelectClient,
   crmClientId, canSchedule, onNewConversation, onError, onInfo
 }: {
   clients: ClientCard[]; selectedClient: ClientCard | null; newLabel: string;
   onAddLabel: (e: FormEvent<HTMLFormElement>) => void; onChangeLabel: (v: string) => void;
   onMoveClient: (id: string, stageId: string) => void; pipelineStages: PipelineStage[];
+  onDeleteClient: (id: string) => void;
   onRemoveLabel: (clientId: string, labelId: string) => void;
   onSelectClient: (id: string) => void;
   crmClientId: string | null; canSchedule: boolean;
@@ -939,6 +954,12 @@ function ClientsView({
                     <button key={s.id} type="button" className={`filter-chip ${(selectedClient.stageId === s.id || (!selectedClient.stageId && idx === 0)) ? "active" : ""}`} onClick={() => onMoveClient(selectedClient.id, s.id)}>{s.name}</button>
                   ))}
                 </div>
+              </div>
+              <div className="side-section">
+                <button type="button" className="danger-btn" style={{ width: "100%" }}
+                  onClick={() => { if (window.confirm(`Excluir o cliente "${selectedClient.name}"? Isso apaga também as conversas e mensagens dele. Ação irreversível.`)) onDeleteClient(selectedClient.id); }}>
+                  Excluir cliente
+                </button>
               </div>
             </>
           ) : (
