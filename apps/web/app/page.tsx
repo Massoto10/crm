@@ -421,6 +421,12 @@ export default function HomePage() {
     } catch (err) { console.error("[removeCustomerTask]", err); toast("Erro ao remover acao", "error"); }
   }
 
+  // Após enviar qualquer mensagem, a conversa vira ativa — leva o usuário pro Chats/aba Ativo.
+  function goToActiveChats() {
+    setView("chats");
+    setChatStatus("active");
+  }
+
   async function submitReply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected || !reply.trim()) return;
@@ -443,6 +449,7 @@ export default function HomePage() {
             : c
         )
       );
+      goToActiveChats();
     } catch (err) {
       console.error("[submitReply] failed:", err);
       toast("Erro ao enviar mensagem", "error");
@@ -470,6 +477,7 @@ export default function HomePage() {
             : c
         )
       );
+      goToActiveChats();
       toast("Audio enviado", "success");
     } catch (err) {
       console.error("[sendAudio] failed:", err);
@@ -504,6 +512,7 @@ export default function HomePage() {
             : c
         )
       );
+      goToActiveChats();
       toast("Arquivo enviado", "success");
     } catch (err) {
       console.error("[sendMedia] failed:", err);
