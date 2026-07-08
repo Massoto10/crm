@@ -105,7 +105,7 @@ export class EndCustomersService {
     return { ok: true };
   }
 
-  async patch(id: string, data: { estimatedValueCents?: number; assignedTo?: string | null }, crmClientId: string) {
+  async patch(id: string, data: { estimatedValueCents?: number; assignedTo?: string | null; pipelineStageId?: string | null }, crmClientId: string) {
     this.logger.log(`patch endCustomerId=${id} crmClientId=${crmClientId}`);
     const customer = await this.prisma.endCustomer.findUnique({ where: { id }, select: { id: true, crmClientId: true } });
     assertFound(customer, "Cliente");

@@ -6,6 +6,7 @@ import { EndCustomersService } from "./end-customers.service";
 class PatchEndCustomerDto {
   @IsOptional() @IsNumber() @Min(0) estimatedValueCents?: number;
   @IsOptional() @IsString() assignedTo?: string | null;
+  @IsOptional() @IsString() pipelineStageId?: string | null;
 }
 
 class AddLabelDto {

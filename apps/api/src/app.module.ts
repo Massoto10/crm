@@ -12,6 +12,7 @@ import { QuickMessagesModule } from "./quick-messages/quick-messages.module";
 import { ScheduledMessagesModule } from "./scheduled-messages/scheduled-messages.module";
 import { LeadStatusesModule } from "./lead-statuses/lead-statuses.module";
 import { LeadSourcesModule } from "./lead-sources/lead-sources.module";
+import { PipelineStagesModule } from "./pipeline-stages/pipeline-stages.module";
 import { SettingsModule } from "./settings/settings.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { WhatsappModule } from "./whatsapp/whatsapp.module";
@@ -33,6 +34,7 @@ import { AccessGuard } from "./auth/access.guard";
     ScheduledMessagesModule,
     LeadStatusesModule,
     LeadSourcesModule,
+    PipelineStagesModule,
     SettingsModule,
     DashboardModule,
     WhatsappModule,

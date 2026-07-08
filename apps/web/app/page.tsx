@@ -19,7 +19,7 @@ function useToast() {
 type View = "dashboard" | "clients" | "chats" | "settings";
 type ChatStatus = "pending" | "active" | "closed";
 type Channel = "whatsapp" | "instagram";
-type Stage = "new" | "qualified" | "proposal" | "won";
+type PipelineStage = { id: string; name: string; color: string; hint: string; order: number };
 type ConvStatus = "pending" | "open" | "waiting_customer" | "waiting_agent" | "closed";
 
 type Label = { id: string; name: string; color: string; category: string };
@@ -52,13 +52,14 @@ type Conversation = {
     leadTemperature: "hot" | "warm" | "cold"; priority: "high" | "medium" | "low";
     estimatedValueCents: number; assignedTo: string | null; lastContactAt: string | null;
     leadStatus?: LeadStatus | null; leadSource?: LeadSource | null; sourceUrl?: string | null; sourceRef?: string | null;
+    pipelineStage?: PipelineStage | null;
     labels: Array<{ label: Label }>; tasks: Task[];
   };
   messages?: Message[];
 };
 
 type ClientCard = {
-  id: string; name: string; company: string; crmClient: string; stage: Stage;
+  id: string; name: string; company: string; crmClient: string; stageId: string | null;
   temperature: "hot" | "warm" | "cold"; priority: "high" | "medium" | "low";
   value: number; owner: string; labels: Label[]; source?: { name: string; color: string } | null;
 };
@@ -76,12 +77,6 @@ type DashMetrics = {
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3333";
 
-const stages: Array<{ id: Stage; title: string; hint: string }> = [
-  { id: "new", title: "Entrada", hint: "Novos contatos" },
-  { id: "qualified", title: "Qualificacao", hint: "Perfil e necessidade" },
-  { id: "proposal", title: "Proposta", hint: "Negociacao ativa" },
-  { id: "won", title: "Fechados", hint: "Clientes ganhos" }
-];
 
 const VIEW_META: Array<{ key: ViewKey; label: string }> = [
   { key: "chats", label: "Chats" },
@@ -174,6 +169,7 @@ export default function HomePage() {
   const [filterDeptId, setFilterDeptId] = useState<string>("");
   const [filterSourceId, setFilterSourceId] = useState<string>("");
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -224,10 +220,11 @@ export default function HomePage() {
     const crmId = firstCrmClientId;
     async function bootstrap() {
       try {
-        const [deptRes, agentRes, srcRes] = await Promise.all([
+        const [deptRes, agentRes, srcRes, stageRes] = await Promise.all([
           apiFetch(`${apiUrl}/api/departments?crmClientId=${crmId}`),
           apiFetch(`${apiUrl}/api/agents?crmClientId=${crmId}`),
-          apiFetch(`${apiUrl}/api/lead-sources?crmClientId=${crmId}`)
+          apiFetch(`${apiUrl}/api/lead-sources?crmClientId=${crmId}`),
+          apiFetch(`${apiUrl}/api/pipeline-stages?crmClientId=${crmId}`)
         ]);
         if (deptRes.ok) setDepartments(await deptRes.json());
         else console.error(`[bootstrap] departments failed: ${deptRes.status}`);
@@ -235,6 +232,8 @@ export default function HomePage() {
         else console.error(`[bootstrap] agents failed: ${agentRes.status}`);
         if (srcRes.ok) setLeadSources(await srcRes.json());
         else console.error(`[bootstrap] lead-sources failed: ${srcRes.status}`);
+        if (stageRes.ok) setPipelineStages(await stageRes.json());
+        else console.error(`[bootstrap] pipeline-stages failed: ${stageRes.status}`);
       } catch (err) {
         console.error("[bootstrap] failed:", err);
       }
@@ -553,8 +552,17 @@ export default function HomePage() {
     setShowQuickPicker(false);
   }
 
-  function moveClient(clientId: string, stage: Stage) {
-    setClients((cur) => cur.map((c) => (c.id === clientId ? { ...c, stage } : c)));
+  async function moveClient(clientId: string, stageId: string) {
+    setClients((cur) => cur.map((c) => (c.id === clientId ? { ...c, stageId } : c))); // otimista
+    try {
+      const res = await apiFetch(`${apiUrl}/api/end-customers/${clientId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pipelineStageId: stageId })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error("[moveClient] falhou:", err);
+      toast("Erro ao mover etapa", "error");
+    }
   }
 
   function addLabel(event: FormEvent<HTMLFormElement>) {
@@ -618,6 +626,7 @@ export default function HomePage() {
           <ClientsView
             clients={clients} selectedClient={selectedClient} newLabel={newLabel}
             onAddLabel={addLabel} onChangeLabel={setNewLabel} onMoveClient={moveClient}
+            pipelineStages={pipelineStages}
             onRemoveLabel={removeLabel} onSelectClient={setSelectedClientId}
             crmClientId={firstCrmClientId} canSchedule={canView("scheduling")}
             onNewConversation={() => setShowProspeccaoModal(true)}
@@ -836,12 +845,13 @@ function DashboardView({
 }
 
 function ClientsView({
-  clients, selectedClient, newLabel, onAddLabel, onChangeLabel, onMoveClient, onRemoveLabel, onSelectClient,
+  clients, selectedClient, newLabel, onAddLabel, onChangeLabel, onMoveClient, pipelineStages, onRemoveLabel, onSelectClient,
   crmClientId, canSchedule, onNewConversation, onError, onInfo
 }: {
   clients: ClientCard[]; selectedClient: ClientCard | null; newLabel: string;
   onAddLabel: (e: FormEvent<HTMLFormElement>) => void; onChangeLabel: (v: string) => void;
-  onMoveClient: (id: string, stage: Stage) => void; onRemoveLabel: (clientId: string, labelId: string) => void;
+  onMoveClient: (id: string, stageId: string) => void; pipelineStages: PipelineStage[];
+  onRemoveLabel: (clientId: string, labelId: string) => void;
   onSelectClient: (id: string) => void;
   crmClientId: string | null; canSchedule: boolean;
   onNewConversation: () => void;
@@ -869,12 +879,13 @@ function ClientsView({
       )}
       <section className="clients-layout">
         <div className="kanban-board">
-          {stages.map((stage) => {
-            const col = clients.filter((c) => c.stage === stage.id);
+          {pipelineStages.map((stage, idx) => {
+            // Cliente sem etapa cai na 1ª coluna.
+            const col = clients.filter((c) => c.stageId === stage.id || (!c.stageId && idx === 0));
             return (
               <div key={stage.id} className="kanban-column" onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, stage.id, onMoveClient)}>
                 <div className="kanban-header">
-                  <div><h2>{stage.title}</h2><span>{stage.hint}</span></div>
+                  <div><h2>{stage.name}</h2><span>{stage.hint}</span></div>
                   <small>{col.length}</small>
                 </div>
                 <div className="kanban-list">
@@ -903,7 +914,7 @@ function ClientsView({
                   <div><h2>{selectedClient.name}</h2><span>{selectedClient.company}</span></div>
                 </div>
                 <div className="profile-grid">
-                  <Info label="Etapa" value={stageTitle(selectedClient.stage)} />
+                  <Info label="Etapa" value={pipelineStages.find((s) => s.id === selectedClient.stageId)?.name ?? pipelineStages[0]?.name ?? "—"} />
                   <Info label="Valor" value={money(selectedClient.value)} />
                   <Info label="Responsavel" value={selectedClient.owner} />
                   <Info label="Prioridade" value={priority(selectedClient.priority)} />
@@ -926,8 +937,8 @@ function ClientsView({
               <div className="side-section">
                 <div className="section-title"><h3>Mover etapa</h3></div>
                 <div className="stage-buttons">
-                  {stages.map((s) => (
-                    <button key={s.id} type="button" className={`filter-chip ${selectedClient.stage === s.id ? "active" : ""}`} onClick={() => onMoveClient(selectedClient.id, s.id)}>{s.title}</button>
+                  {pipelineStages.map((s, idx) => (
+                    <button key={s.id} type="button" className={`filter-chip ${(selectedClient.stageId === s.id || (!selectedClient.stageId && idx === 0)) ? "active" : ""}`} onClick={() => onMoveClient(selectedClient.id, s.id)}>{s.name}</button>
                   ))}
                 </div>
               </div>
@@ -1346,7 +1357,7 @@ function ChatsView({
 }
 
 function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null }) {
-  type SettingsTab = "departments" | "agents" | "quickMessages" | "leadStatuses" | "leadSources" | "rules" | "whatsapp" | "danger";
+  type SettingsTab = "departments" | "agents" | "quickMessages" | "leadStatuses" | "leadSources" | "pipelineStages" | "rules" | "whatsapp" | "danger";
   const { toasts, toast } = useToast();
   const [tab, setTab] = useState<SettingsTab>("departments");
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -1354,6 +1365,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
   const [quickMessages, setQuickMessages] = useState<QuickMsg[]>([]);
   const [leadStatuses, setLeadStatuses] = useState<LeadStatus[]>([]);
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
   const [waNumber, setWaNumber] = useState<string>("");
   const [rules, setRules] = useState<Record<string, string>>({});
 
@@ -1372,6 +1384,9 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
   const [srcName, setSrcName] = useState("");
   const [srcColor, setSrcColor] = useState("#d62976");
   const [srcCode, setSrcCode] = useState("");
+  const [stageName, setStageName] = useState("");
+  const [stageColor, setStageColor] = useState("#206d6f");
+  const [stageHint, setStageHint] = useState("");
   const [clearConfirm, setClearConfirm] = useState("");
   const [clearing, setClearing] = useState(false);
   const [waSyncing, setWaSyncing] = useState(false);
@@ -1490,9 +1505,10 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
       apiFetch(`${apiUrl}/api/quick-messages?crmClientId=${crmId}`).then((r) => r.ok ? r.json() : Promise.reject(`quick-messages ${r.status}`)),
       apiFetch(`${apiUrl}/api/lead-statuses?crmClientId=${crmId}`).then((r) => r.ok ? r.json() : Promise.reject(`lead-statuses ${r.status}`)),
       apiFetch(`${apiUrl}/api/lead-sources?crmClientId=${crmId}`).then((r) => r.ok ? r.json() : Promise.reject(`lead-sources ${r.status}`)),
+      apiFetch(`${apiUrl}/api/pipeline-stages?crmClientId=${crmId}`).then((r) => r.ok ? r.json() : Promise.reject(`pipeline-stages ${r.status}`)),
       apiFetch(`${apiUrl}/api/settings/${crmId}`).then((r) => r.ok ? r.json() : Promise.reject(`settings ${r.status}`))
-    ]).then(([d, a, q, l, src, s]) => {
-      setDepartments(d); setAgents(a); setQuickMessages(q); setLeadStatuses(l); setLeadSources(src); setRules(s);
+    ]).then(([d, a, q, l, src, ps, s]) => {
+      setDepartments(d); setAgents(a); setQuickMessages(q); setLeadStatuses(l); setLeadSources(src); setPipelineStages(ps); setRules(s);
     }).catch((err) => {
       console.error("[SettingsView] load failed:", err);
       toast("Erro ao carregar configuracoes", "error");
@@ -1609,6 +1625,41 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     } catch (err) { console.error("[removeSrc]", err); toast("Erro ao remover origem", "error"); }
   }
 
+  async function addStage(e: FormEvent) {
+    e.preventDefault();
+    if (!firstCrmClientId || !stageName.trim()) return;
+    try {
+      const res = await apiFetch(`${apiUrl}/api/pipeline-stages`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ crmClientId: firstCrmClientId, name: stageName.trim(), color: stageColor, hint: stageHint.trim() || undefined, order: pipelineStages.length })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const s = await res.json(); setPipelineStages((prev) => [...prev, s]); setStageName(""); setStageHint("");
+      toast("Etapa criada", "success");
+    } catch (err) { console.error("[addStage]", err); toast("Erro ao criar etapa (nome ja existe?)", "error"); }
+  }
+
+  async function removeStage(id: string) {
+    try {
+      const res = await apiFetch(`${apiUrl}/api/pipeline-stages/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setPipelineStages((prev) => prev.filter((s) => s.id !== id));
+      toast("Etapa removida", "success");
+    } catch (err) { console.error("[removeStage]", err); toast("Erro ao remover etapa", "error"); }
+  }
+
+  async function renameStage(id: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      const res = await apiFetch(`${apiUrl}/api/pipeline-stages/${id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: trimmed })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setPipelineStages((prev) => prev.map((s) => (s.id === id ? { ...s, name: trimmed } : s)));
+    } catch (err) { console.error("[renameStage]", err); toast("Erro ao renomear etapa", "error"); }
+  }
+
   async function clearAllChats() {
     if (clearConfirm !== "confirmar" || clearing) return;
     setClearing(true);
@@ -1641,6 +1692,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     { id: "quickMessages", label: "Msgs Rapidas" },
     { id: "leadStatuses", label: "Status de Lead" },
     { id: "leadSources", label: "Origens" },
+    { id: "pipelineStages", label: "Etapas do funil" },
     { id: "rules", label: "Regras" },
     { id: "whatsapp", label: "WhatsApp" },
     { id: "danger", label: "Zona de risco" }
@@ -1814,6 +1866,38 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
                   );
                 })}
                 {leadSources.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--muted)" }}>Nenhuma origem cadastrada.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === "pipelineStages" && (
+          <div className="settings-section">
+            <h2>Etapas do funil (board de Clientes)</h2>
+            <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>
+              As colunas do quadro de Clientes. Crie, renomeie, escolha a cor e remova. A ordem segue a de criação.
+              Ao remover uma etapa, os clientes dela voltam para a primeira coluna.
+            </p>
+            <form className="settings-add-form settings-add-form--wide" onSubmit={addStage}>
+              <input value={stageName} onChange={(e) => setStageName(e.target.value)} placeholder="Nome (ex: Entrada)" />
+              <input value={stageHint} onChange={(e) => setStageHint(e.target.value)} placeholder="Descrição (ex: Novos contatos)" />
+              <input type="color" value={stageColor} onChange={(e) => setStageColor(e.target.value)} style={{ width: 42, height: 38, padding: 2, border: "1px solid var(--line)", borderRadius: 8 }} />
+              <button className="primary-button slim" type="submit">Adicionar</button>
+            </form>
+            <table className="settings-table">
+              <thead><tr><th>Etapa</th><th>Descrição</th><th>Ações</th></tr></thead>
+              <tbody>
+                {pipelineStages.map((s) => (
+                  <tr key={s.id}>
+                    <td>
+                      <span className="tag" style={{ borderColor: s.color, color: s.color, marginRight: 8 }}>●</span>
+                      <input defaultValue={s.name} onBlur={(e) => { if (e.target.value.trim() && e.target.value.trim() !== s.name) renameStage(s.id, e.target.value); }} style={{ border: "1px solid var(--line)", borderRadius: 6, padding: "4px 8px", maxWidth: 180 }} />
+                    </td>
+                    <td>{s.hint || "—"}</td>
+                    <td><button type="button" className="danger-btn" onClick={() => removeStage(s.id)}>Remover</button></td>
+                  </tr>
+                ))}
+                {pipelineStages.length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--muted)" }}>Nenhuma etapa cadastrada.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2489,17 +2573,13 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-function handleDrop(event: DragEvent<HTMLDivElement>, stage: Stage, onMoveClient: (id: string, stage: Stage) => void) {
+function handleDrop(event: DragEvent<HTMLDivElement>, stageId: string, onMoveClient: (id: string, stageId: string) => void) {
   event.preventDefault();
   const id = event.dataTransfer.getData("text/plain");
-  if (id) onMoveClient(id, stage);
+  if (id) onMoveClient(id, stageId);
 }
 
 function buildClients(conversations: Conversation[]): ClientCard[] {
-  const stageMap: Record<string, Stage> = {
-    new: "new", qualified: "qualified", proposal: "proposal", won: "won",
-    "Primeiro contato": "new", Qualificacao: "qualified", Apresentacao: "qualified", "Proposta comercial": "proposal"
-  };
   const byCustomer = new Map<string, ClientCard>();
   conversations.forEach((conv) => {
     if (byCustomer.has(conv.endCustomer.id)) return;
@@ -2508,7 +2588,7 @@ function buildClients(conversations: Conversation[]): ClientCard[] {
       name: conv.endCustomer.fullName,
       company: conv.endCustomer.companyName ?? conv.crmClient.tradeName,
       crmClient: conv.crmClient.tradeName,
-      stage: stageMap[conv.stage] ?? "new",
+      stageId: conv.endCustomer.pipelineStage?.id ?? null,
       temperature: conv.endCustomer.leadTemperature,
       priority: conv.endCustomer.priority,
       value: conv.endCustomer.estimatedValueCents,
@@ -2527,7 +2607,6 @@ function time(date: string) { return new Intl.DateTimeFormat("pt-BR", { hour: "2
 function temperature(v: string) { return ({ hot: "Lead quente", warm: "Lead morno", cold: "Lead frio" } as Record<string, string>)[v] ?? v; }
 function classification(v: string) { return ({ strategic: "Estrategico", growth: "Crescimento", standard: "Padrao", at_risk: "Em risco" } as Record<string, string>)[v] ?? v; }
 function sla(v: string) { return ({ on_time: "No prazo", warning: "Atencao", late: "Atrasado" } as Record<string, string>)[v] ?? v; }
-function stageTitle(v: Stage) { return stages.find((s) => s.id === v)?.title ?? v; }
 function priority(v: string) { return ({ high: "Alta", medium: "Media", low: "Baixa" } as Record<string, string>)[v] ?? v; }
 function convStatusLabel(s: ConvStatus) { return ({ pending: "Pendente", open: "Ativo", waiting_customer: "Aguardando", waiting_agent: "Fila", closed: "Fechado" } as Record<string, string>)[s] ?? s; }
 function formatSeconds(s: number) { if (!s) return "-"; if (s < 60) return `${s}s`; if (s < 3600) return `${Math.round(s / 60)}min`; return `${Math.round(s / 3600)}h`; }

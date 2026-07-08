@@ -119,6 +119,7 @@ model CrmClient {
   quickMessages     QuickMessage[]
   leadStatuses      LeadStatus[]
   leadSources       LeadSource[]
+  pipelineStages    PipelineStage[]
   settings          Setting[]
   scheduledMessages ScheduledMessage[]
 
@@ -193,6 +194,24 @@ model LeadStatus {
   @@map("lead_statuses")
 }
 
+model PipelineStage {
+  id          String        @id @default(cuid())
+  crmClientId String        @map("crm_client_id")
+  name        String
+  color       String
+  hint        String        @default("")
+  order       Int           @default(0)
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  crmClient   CrmClient     @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
+  customers   EndCustomer[]
+
+  @@unique([crmClientId, name])
+  @@index([crmClientId])
+  @@map("pipeline_stages")
+}
+
 model LeadSource {
   id          String        @id @default(cuid())
   crmClientId String        @map("crm_client_id")
@@ -217,6 +236,7 @@ model EndCustomer {
   crmClientId         String                 @map("crm_client_id")
   leadStatusId        String?                @map("lead_status_id")
   leadSourceId        String?                @map("lead_source_id")
+  pipelineStageId     String?                @map("pipeline_stage_id")
   sourceUrl           String?                @map("source_url")
   sourceRef           String?                @map("source_ref")
   fullName            String                 @map("full_name")
@@ -239,6 +259,7 @@ model EndCustomer {
   crmClient           CrmClient              @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
   leadStatus          LeadStatus?            @relation(fields: [leadStatusId], references: [id])
   leadSource          LeadSource?            @relation(fields: [leadSourceId], references: [id])
+  pipelineStage       PipelineStage?         @relation(fields: [pipelineStageId], references: [id])
   conversations       Conversation[]
   labels              EndCustomerLabel[]
   tasks               Task[]

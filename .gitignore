@@ -11,5 +11,14 @@ coverage
 screenshot-*.png
 ss-*.png
 screenshot-*.mjs
+run.png
+runtest.mjs
 
 .vercel
+
+# Infra/segredos do VPS — NUNCA versionar
+docker-compose.vps.yml
+Caddyfile
+vpsrun.py
+schema.sql
+seed.sql

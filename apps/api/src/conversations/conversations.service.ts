@@ -37,6 +37,7 @@ const convInclude = {
     include: {
       leadStatus: true,
       leadSource: true,
+      pipelineStage: true,
       labels: { include: { label: true } },
       tasks: true
     }
