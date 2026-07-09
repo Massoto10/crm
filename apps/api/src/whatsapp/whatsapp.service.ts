@@ -104,9 +104,12 @@ export class WhatsappService {
     // Evolution espera base64 sem o prefixo data:
     const audio = audioBase64.includes(",") ? audioBase64.slice(audioBase64.indexOf(",") + 1) : audioBase64;
     this.logger.log(`sendAudio instance=${instanceName} to=${number} bytes=${audio.length}`);
+    // encoding=true força o Evolution a transcodificar (ffmpeg) pro formato PTT do WhatsApp
+    // (ogg/opus). Sem isso, áudio de navegador (webm/opus) quebra o Baileys ("Connection Closed").
     const res = await this.req<{ key?: { id?: string; remoteJid?: string } }>("POST", `/message/sendWhatsAppAudio/${instanceName}`, {
       number,
-      audio
+      audio,
+      encoding: true
     });
     return { messageId: res?.key?.id ?? null, jid: res?.key?.remoteJid ?? null };
   }

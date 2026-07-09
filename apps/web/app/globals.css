@@ -394,6 +394,12 @@ h1 {
   padding: 16px;
 }
 
+/* Painel do contato rola internamente quando maior que a altura do board */
+.profile-panel {
+  overflow-y: auto;
+  min-height: 0;
+}
+
 .panel-header,
 .detail-header,
 .section-title,
