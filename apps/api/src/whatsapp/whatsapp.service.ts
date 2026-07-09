@@ -1,5 +1,36 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { spawn } from "child_process";
 import { normalizeBrazilPhone } from "../common/phone";
+
+// Transcodifica áudio (ex: webm/opus do navegador) para ogg/opus mono 16kHz,
+// o formato de nota de voz (PTT) que o WhatsApp aceita. Sem isso o Baileys do
+// Evolution estoura "Connection Closed". Retorna base64 do ogg resultante.
+function transcodeToOpusOgg(inputBase64: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const ff = spawn("ffmpeg", [
+      "-i", "pipe:0",
+      "-vn",
+      "-ac", "1",
+      "-ar", "16000",
+      "-c:a", "libopus",
+      "-b:a", "24k",
+      "-f", "ogg",
+      "pipe:1"
+    ]);
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    ff.stdout.on("data", (d: Buffer) => out.push(d));
+    ff.stderr.on("data", (d: Buffer) => err.push(d));
+    ff.on("error", (e) => reject(e));
+    ff.on("close", (code) => {
+      if (code === 0 && out.length) resolve(Buffer.concat(out).toString("base64"));
+      else reject(new Error(`ffmpeg exit=${code}: ${Buffer.concat(err).toString().slice(-400)}`));
+    });
+    ff.stdin.on("error", () => { /* ignora EPIPE se o ffmpeg fechar antes */ });
+    ff.stdin.write(Buffer.from(inputBase64, "base64"));
+    ff.stdin.end();
+  });
+}
 
 export interface EvoInstance {
   instanceName: string;
@@ -101,15 +132,20 @@ export class WhatsappService {
   // Envia áudio (PTT/voice). `audio` aceita base64 puro ou data URI — Evolution converte.
   async sendAudio(instanceName: string, phone: string, audioBase64: string): Promise<{ messageId: string | null; jid: string | null }> {
     const number = phone.includes("@") ? phone : normalizeBrazilPhone(phone);
-    // Evolution espera base64 sem o prefixo data:
-    const audio = audioBase64.includes(",") ? audioBase64.slice(audioBase64.indexOf(",") + 1) : audioBase64;
+    // base64 puro (sem prefixo data:)
+    const raw = audioBase64.includes(",") ? audioBase64.slice(audioBase64.indexOf(",") + 1) : audioBase64;
+    // Converte pro formato PTT do WhatsApp (ogg/opus). Se o ffmpeg falhar, tenta o áudio original.
+    let audio = raw;
+    try {
+      audio = await transcodeToOpusOgg(raw);
+      this.logger.log(`sendAudio transcode ok bytes=${raw.length}->${audio.length}`);
+    } catch (e) {
+      this.logger.error(`sendAudio transcode falhou, usando original: ${String(e)}`);
+    }
     this.logger.log(`sendAudio instance=${instanceName} to=${number} bytes=${audio.length}`);
-    // encoding=true força o Evolution a transcodificar (ffmpeg) pro formato PTT do WhatsApp
-    // (ogg/opus). Sem isso, áudio de navegador (webm/opus) quebra o Baileys ("Connection Closed").
     const res = await this.req<{ key?: { id?: string; remoteJid?: string } }>("POST", `/message/sendWhatsAppAudio/${instanceName}`, {
       number,
-      audio,
-      encoding: true
+      audio
     });
     return { messageId: res?.key?.id ?? null, jid: res?.key?.remoteJid ?? null };
   }

@@ -1,6 +1,7 @@
 # API NestJS (STN CRM) — para Railway/Render/VPS
 FROM node:20-slim AS base
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# openssl p/ Prisma; ffmpeg p/ transcodificar áudio do navegador (webm) -> ogg/opus (PTT WhatsApp)
+RUN apt-get update -y && apt-get install -y openssl ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Instala deps do monorepo (raiz + workspaces api e database)
