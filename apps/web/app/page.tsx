@@ -2507,8 +2507,18 @@ function BulkScheduleModal({ crmClientId, endCustomerIds, onClose, onError, onDo
 function AudioRecorder({ onSend, onError }: { onSend: (audioBase64: string, mimetype: string) => void; onError: (msg: string) => void }) {
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const sendRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function cleanupStream() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  }
 
   async function start() {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -2517,14 +2527,19 @@ function AudioRecorder({ onSend, onError }: { onSend: (audioBase64: string, mime
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
+      sendRef.current = false;
       rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       rec.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
+        cleanupStream();
+        const shouldSend = sendRef.current;
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
-        if (blob.size === 0) { setBusy(false); return; }
+        chunksRef.current = [];
+        if (!shouldSend) { setBusy(false); return; } // cancelado → descarta
+        if (blob.size === 0) { setBusy(false); onError("Áudio vazio, tente de novo"); return; }
         try {
           const dataUri = await new Promise<string>((resolve, reject) => {
             const fr = new FileReader();
@@ -2538,17 +2553,20 @@ function AudioRecorder({ onSend, onError }: { onSend: (audioBase64: string, mime
           onError("Erro ao processar audio");
         } finally { setBusy(false); }
       };
-      rec.start();
+      rec.start(250); // timeslice: garante captura dos chunks
       recorderRef.current = rec;
+      setElapsed(0);
       setRecording(true);
+      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
     } catch (err) {
       console.error("[AudioRecorder] getUserMedia falhou:", err);
       onError("Permita o acesso ao microfone para gravar");
     }
   }
 
-  function stop() {
+  function finishSend() {
     if (recorderRef.current && recording) {
+      sendRef.current = true;
       setBusy(true);
       setRecording(false);
       recorderRef.current.stop();
@@ -2556,15 +2574,31 @@ function AudioRecorder({ onSend, onError }: { onSend: (audioBase64: string, mime
     }
   }
 
+  function cancel() {
+    if (recorderRef.current && recording) {
+      sendRef.current = false;
+      setRecording(false);
+      recorderRef.current.stop();
+      recorderRef.current = null;
+    }
+  }
+
+  if (recording) {
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+    const ss = String(elapsed % 60).padStart(2, "0");
+    return (
+      <div className="audio-recording">
+        <span className="rec-dot" />
+        <span className="rec-time">{mm}:{ss}</span>
+        <button type="button" className="reply-tool-btn danger" onClick={cancel} title="Cancelar gravação">✖ Cancelar</button>
+        <button type="button" className="reply-tool-btn send" onClick={finishSend} title="Enviar áudio">➤ Enviar</button>
+      </div>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      className={`reply-tool-btn ${recording ? "recording" : ""}`}
-      onClick={recording ? stop : start}
-      disabled={busy}
-      title={recording ? "Parar e enviar" : "Gravar audio"}
-    >
-      {recording ? "⏹ Parar" : busy ? "..." : "🎤 Audio"}
+    <button type="button" className="reply-tool-btn" onClick={start} disabled={busy} title="Gravar audio">
+      {busy ? "..." : "🎤 Audio"}
     </button>
   );
 }
