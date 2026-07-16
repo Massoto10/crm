@@ -10,9 +10,4 @@ export class SendAudioDto {
   @IsString()
   @MaxLength(60)
   mimetype?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  senderName?: string;
 }

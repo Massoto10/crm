@@ -2,10 +2,6 @@ import { IsHexColor, IsInt, IsOptional, IsString, MaxLength, Min } from "class-v
 
 export class CreateLeadStatusDto {
   @IsString()
-  @MaxLength(36)
-  crmClientId!: string;
-
-  @IsString()
   @MaxLength(60)
   name!: string;
 

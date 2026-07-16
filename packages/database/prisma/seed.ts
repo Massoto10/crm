@@ -1,10 +1,20 @@
 import { PrismaClient } from "@prisma/client";
+import * as bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 const now = new Date("2026-06-03T10:30:00-03:00");
 
 async function main() {
+  if (process.env.ALLOW_DESTRUCTIVE_SEED !== "true") {
+    throw new Error("Seed bloqueado: defina ALLOW_DESTRUCTIVE_SEED=true para confirmar a limpeza dos dados.");
+  }
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword || adminPassword.length < 12) {
+    throw new Error("Defina SEED_ADMIN_PASSWORD com pelo menos 12 caracteres.");
+  }
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
+
   await prisma.message.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.task.deleteMany();
@@ -12,6 +22,7 @@ async function main() {
   await prisma.label.deleteMany();
   await prisma.endCustomer.deleteMany();
   await prisma.clientChannel.deleteMany();
+  await prisma.agent.deleteMany();
   await prisma.crmClient.deleteMany();
 
   const studio = await prisma.crmClient.create({
@@ -57,6 +68,14 @@ async function main() {
       ownerName: "Joao",
       createdAt: now
     }
+  });
+
+  await prisma.agent.createMany({
+    data: [
+      { crmClientId: studio.id, name: "Administrador Studio", email: "admin@studio.local", passwordHash, role: "admin" },
+      { crmClientId: almeida.id, name: "Administrador Almeida", email: "admin@almeida.local", passwordHash, role: "admin" },
+      { crmClientId: nina.id, name: "Administrador Nina", email: "admin@nina.local", passwordHash, role: "admin" }
+    ]
   });
 
   await prisma.label.createMany({

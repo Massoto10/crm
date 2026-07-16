@@ -4,10 +4,6 @@ import { IsCuid } from "../../common/validators/is-cuid";
 
 export class CreateAgentDto {
   @IsString()
-  @MaxLength(36)
-  crmClientId!: string;
-
-  @IsString()
   @MaxLength(80)
   name!: string;
 

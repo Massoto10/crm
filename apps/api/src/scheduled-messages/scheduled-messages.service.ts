@@ -1,25 +1,25 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { ChannelType, ScheduledMessageStatus } from "@prisma/client";
-import { assertFound } from "../common/assert-found";
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ChannelType, Prisma, ScheduledMessageStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "../whatsapp/whatsapp.service";
 
 const PROCESS_INTERVAL_MS = 60_000;
+const PROCESSING_LEASE_MS = 5 * 60_000;
+
+type DueMessage = Prisma.ScheduledMessageGetPayload<{
+  include: { conversation: { include: { endCustomer: true } } };
+}>;
 
 @Injectable()
 export class ScheduledMessagesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ScheduledMessagesService.name);
   private processTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly whatsapp: WhatsappService
-  ) {}
+  constructor(private readonly prisma: PrismaService, private readonly whatsapp: WhatsappService) {}
 
-  // Processa mensagens agendadas a cada minuto — sem isso elas nunca seriam enviadas
   onModuleInit() {
     this.processTimer = setInterval(() => {
-      this.processDue().catch((err) => this.logger.error(`processDue tick failed: ${err}`));
+      this.processDue().catch((err) => this.logger.error(`processDue tick failed: ${String(err)}`));
     }, PROCESS_INTERVAL_MS);
   }
 
@@ -27,173 +27,204 @@ export class ScheduledMessagesService implements OnModuleInit, OnModuleDestroy {
     if (this.processTimer) clearInterval(this.processTimer);
   }
 
-  findAll(crmClientId: string, status?: ScheduledMessageStatus) {
-    this.logger.log(`findAll scheduled-messages crmClientId=${crmClientId}${status ? ` status=${status}` : ""}`);
+  findAll(crmClientId: string, status?: ScheduledMessageStatus, agentId?: string) {
     return this.prisma.scheduledMessage.findMany({
-      where: { crmClientId, ...(status ? { status } : {}) },
+      where: { crmClientId, ...(status ? { status } : {}), ...(agentId ? { agentId } : {}) },
       orderBy: { scheduledAt: "asc" },
-      include: {
-        conversation: { include: { endCustomer: true } },
-        endCustomer: true
+      include: { conversation: { include: { endCustomer: true } }, endCustomer: true }
+    });
+  }
+
+  private parseFutureDate(value: string) {
+    const scheduledAt = new Date(value);
+    if (Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+      throw new BadRequestException("Agendamento deve estar no futuro");
+    }
+    return scheduledAt;
+  }
+
+  private async assertAgentInTenant(agentId: string | undefined, crmClientId: string) {
+    if (!agentId) return;
+    const agent = await this.prisma.agent.findFirst({ where: { id: agentId, crmClientId, isActive: true } });
+    if (!agent) throw new NotFoundException("Agente não encontrado");
+  }
+
+  private async assertConversationInTenant(conversationId: string, crmClientId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, crmClientId },
+      select: { id: true, endCustomerId: true, channelType: true }
+    });
+    if (!conversation) throw new NotFoundException("Conversa não encontrada");
+    if (conversation.channelType !== "whatsapp") {
+      throw new BadRequestException("Agendamentos só estão disponíveis para WhatsApp");
+    }
+    return conversation;
+  }
+
+  async create(data: {
+    crmClientId: string; conversationId?: string; endCustomerId?: string; agentId?: string; body: string; scheduledAt: string;
+  }) {
+    const body = data.body.trim();
+    if (!body) throw new BadRequestException("Mensagem é obrigatória");
+    if (!data.conversationId) throw new BadRequestException("Conversa é obrigatória");
+    const [scheduledAt, conversation] = await Promise.all([
+      Promise.resolve(this.parseFutureDate(data.scheduledAt)),
+      this.assertConversationInTenant(data.conversationId, data.crmClientId),
+      this.assertAgentInTenant(data.agentId, data.crmClientId)
+    ]);
+    if (data.endCustomerId && data.endCustomerId !== conversation.endCustomerId) {
+      throw new BadRequestException("Contato não pertence à conversa");
+    }
+    return this.prisma.scheduledMessage.create({
+      data: {
+        crmClientId: data.crmClientId,
+        conversationId: conversation.id,
+        endCustomerId: conversation.endCustomerId,
+        agentId: data.agentId,
+        body,
+        scheduledAt
       }
     });
   }
 
-  create(data: {
-    crmClientId: string;
-    conversationId?: string;
-    endCustomerId?: string;
-    agentId?: string;
-    body: string;
-    scheduledAt: string;
-  }) {
-    this.logger.log(`create scheduled-message crmClientId=${data.crmClientId} scheduledAt=${data.scheduledAt}`);
-    return this.prisma.scheduledMessage.create({
-      data: { ...data, scheduledAt: new Date(data.scheduledAt) }
-    });
-  }
-
-  // Agenda a mesma mensagem para vários clientes. Para cada cliente garante uma
-  // conversa (reusa a aberta ou cria pendente) — o processDue exige conversationId.
   async createBulk(data: {
-    crmClientId: string;
-    endCustomerIds: string[];
-    channelType: ChannelType;
-    agentId?: string;
-    body: string;
-    scheduledAt: string;
+    crmClientId: string; endCustomerIds: string[]; channelType: ChannelType; agentId?: string; body: string; scheduledAt: string;
   }) {
-    const scheduledAt = new Date(data.scheduledAt);
+    if (data.channelType !== "whatsapp") throw new BadRequestException("Agendamentos só estão disponíveis para WhatsApp");
+    const body = data.body.trim();
+    if (!body) throw new BadRequestException("Mensagem é obrigatória");
+    const scheduledAt = this.parseFutureDate(data.scheduledAt);
+    await this.assertAgentInTenant(data.agentId, data.crmClientId);
+
     const ids = [...new Set(data.endCustomerIds)];
     let scheduled = 0;
     let skipped = 0;
-
-    this.logger.log(`createBulk start crmClientId=${data.crmClientId} targets=${ids.length} channel=${data.channelType}`);
-
     for (const endCustomerId of ids) {
       try {
-        const customer = await this.prisma.endCustomer.findUnique({
-          where: { id: endCustomerId },
-          select: { id: true, crmClientId: true }
-        });
-        if (!customer || customer.crmClientId !== data.crmClientId) {
-          this.logger.warn(`createBulk skip endCustomerId=${endCustomerId}: nao pertence ao crmClient ou inexistente`);
+        const customer = await this.prisma.endCustomer.findFirst({ where: { id: endCustomerId, crmClientId: data.crmClientId }, select: { id: true } });
+        if (!customer) {
           skipped++;
           continue;
         }
-
         const conversationId = await this.resolveBulkConversation(data.crmClientId, endCustomerId, data.channelType);
-
         await this.prisma.scheduledMessage.create({
-          data: { crmClientId: data.crmClientId, conversationId, endCustomerId, agentId: data.agentId, body: data.body, scheduledAt }
+          data: { crmClientId: data.crmClientId, conversationId, endCustomerId, agentId: data.agentId, body, scheduledAt }
         });
         scheduled++;
       } catch (err) {
-        this.logger.error(`createBulk falhou endCustomerId=${endCustomerId}: ${String(err)}`);
+        this.logger.error(`createBulk failed endCustomerId=${endCustomerId}: ${String(err)}`);
         skipped++;
       }
     }
-
-    this.logger.log(`createBulk done crmClientId=${data.crmClientId} scheduled=${scheduled} skipped=${skipped}/${ids.length}`);
-    return { scheduled, requested: ids.length };
+    return { scheduled, requested: ids.length, skipped };
   }
 
-  // Reusa a conversa não-fechada do cliente ou cria uma pendente. Trata corrida:
-  // se um create paralelo criar a conversa ao mesmo tempo, re-busca em vez de duplicar.
   private async resolveBulkConversation(crmClientId: string, endCustomerId: string, channelType: ChannelType): Promise<string> {
     const existing = await this.prisma.conversation.findFirst({
       where: { crmClientId, endCustomerId, channelType, status: { not: "closed" } },
-      orderBy: { lastMessageAt: "desc" },
-      select: { id: true }
+      orderBy: { lastMessageAt: "desc" }, select: { id: true }
     });
     if (existing) return existing.id;
-
-    try {
-      const created = await this.prisma.conversation.create({
-        data: {
-          crmClientId, endCustomerId, channelType,
-          status: "pending", stage: "Primeiro contato", slaStatus: "on_time",
-          lastMessagePreview: "Mensagem agendada", lastMessageAt: new Date()
-        },
-        select: { id: true }
-      });
-      return created.id;
-    } catch (err) {
-      // Corrida: outro request criou a conversa em paralelo — re-busca em vez de duplicar.
-      this.logger.warn(`resolveBulkConversation corrida endCustomerId=${endCustomerId}, re-buscando: ${String(err)}`);
-      const winner = await this.prisma.conversation.findFirst({
-        where: { crmClientId, endCustomerId, channelType, status: { not: "closed" } },
-        orderBy: { lastMessageAt: "desc" },
-        select: { id: true }
-      });
-      if (winner) return winner.id;
-      throw err;
-    }
+    const created = await this.prisma.conversation.create({
+      data: {
+        crmClientId, endCustomerId, channelType, status: "pending", stage: "Primeiro contato", slaStatus: "on_time",
+        lastMessagePreview: "Mensagem agendada", lastMessageAt: new Date()
+      },
+      select: { id: true }
+    });
+    return created.id;
   }
 
-  async cancel(id: string) {
-    assertFound(await this.prisma.scheduledMessage.findUnique({ where: { id } }), "Mensagem agendada");
-    const result = await this.prisma.scheduledMessage.update({ where: { id }, data: { status: "canceled" } });
-    this.logger.log(`canceled scheduled-message id=${id}`);
-    return result;
+  async cancel(id: string, crmClientId: string, agentId?: string) {
+    const result = await this.prisma.scheduledMessage.updateMany({
+      where: { id, crmClientId, status: "pending", ...(agentId ? { agentId } : {}) },
+      data: { status: "canceled", processingAt: null }
+    });
+    if (!result.count) throw new NotFoundException("Agendamento pendente não encontrado");
+    return { ok: true };
   }
 
   async processDue() {
-    const due = await this.prisma.scheduledMessage.findMany({
-      where: { status: "pending", scheduledAt: { lte: new Date() } },
-      include: { conversation: { include: { endCustomer: true } } }
+    const now = new Date();
+    const staleBefore = new Date(now.getTime() - PROCESSING_LEASE_MS);
+    const candidates = await this.prisma.scheduledMessage.findMany({
+      where: {
+        OR: [
+          { status: "pending", scheduledAt: { lte: now } },
+          { status: "processing", processingAt: { lt: staleBefore } }
+        ]
+      },
+      select: { id: true, status: true }
     });
 
-    this.logger.log(`processDue found=${due.length} pending messages`);
-
-    const results = await Promise.allSettled(
-      due.map(async (sm) => {
-        if (!sm.conversationId || !sm.conversation) return;
-        const now = new Date();
-        const message = await this.prisma.message.create({
-          data: { conversationId: sm.conversationId, senderType: "agent", senderName: "Agendado", body: sm.body, sentAt: now }
-        });
-        await this.prisma.conversation.update({
-          where: { id: sm.conversationId },
-          data: { lastMessagePreview: sm.body, lastMessageAt: now, status: "waiting_customer" }
-        });
-        await this.prisma.scheduledMessage.update({ where: { id: sm.id }, data: { status: "sent", sentAt: now } });
-
-        // Entrega real no WhatsApp — mesma regra de destino do envio manual:
-        // prefere o telefone real; usa o jid @lid só quando o número real é desconhecido
-        if (sm.conversation.channelType === "whatsapp") {
-          const customer = sm.conversation.endCustomer;
-          const jid = customer?.whatsappJid ?? null;
-          const phone = customer?.phone?.replace(/\D/g, "") ?? null;
-          const lidDigits = jid?.endsWith("@lid") ? jid.replace(/@.+$/, "") : null;
-          const target = lidDigits && phone === lidDigits ? jid : phone ?? jid;
-          if (target) {
-            const setting = await this.prisma.setting.findFirst({
-              where: { crmClientId: sm.crmClientId, key: "wa_instance_name" }
-            });
-            if (setting) {
-              const { messageId: waMessageId } = await this.whatsapp.sendText(setting.value, target, sm.body).catch((err) => {
-                this.logger.error(`scheduled whatsapp send failed id=${sm.id}: ${err}`);
-                return { messageId: null, jid: null };
-              });
-              if (waMessageId) {
-                await this.prisma.message.update({ where: { id: message.id }, data: { waMessageId } });
-              }
-            }
-          }
-        }
-
-        this.logger.log(`sent scheduled-message id=${sm.id} convId=${sm.conversationId}`);
-      })
-    );
-
-    const errors = results.filter((r) => r.status === "rejected");
-    if (errors.length > 0) {
-      errors.forEach((r) => {
-        if (r.status === "rejected") this.logger.error(`processDue failed for a message: ${r.reason}`);
+    const claimedIds: string[] = [];
+    for (const candidate of candidates) {
+      const where: Prisma.ScheduledMessageWhereInput = candidate.status === "pending"
+        ? { id: candidate.id, status: "pending", scheduledAt: { lte: now } }
+        : { id: candidate.id, status: "processing", processingAt: { lt: staleBefore } };
+      const claim = await this.prisma.scheduledMessage.updateMany({
+        where,
+        data: { status: "processing", processingAt: now }
       });
+      if (claim.count) claimedIds.push(candidate.id);
     }
+    if (!claimedIds.length) return { processed: 0, errors: 0 };
 
-    return { processed: due.length, errors: errors.length };
+    const due = await this.prisma.scheduledMessage.findMany({
+      where: { id: { in: claimedIds }, status: "processing" },
+      include: { conversation: { include: { endCustomer: true } } }
+    });
+    const results = await Promise.allSettled(due.map((message) => this.deliver(message)));
+    const errors = results.filter((result) => result.status === "rejected").length;
+    return { processed: due.length, errors };
+  }
+
+  private async deliver(scheduled: DueMessage) {
+    try {
+      if (!scheduled.conversationId || !scheduled.conversation?.endCustomer) {
+        throw new Error("Agendamento sem conversa ou contato");
+      }
+      if (scheduled.conversation.channelType !== "whatsapp") {
+        throw new Error("Canal de agendamento não suportado");
+      }
+      const customer = scheduled.conversation.endCustomer;
+      const jid = customer.whatsappJid ?? null;
+      const phone = customer.phone?.replace(/\D/g, "") ?? null;
+      const lidDigits = jid?.endsWith("@lid") ? jid.replace(/@.+$/, "") : null;
+      const target = lidDigits && phone === lidDigits ? jid : phone ?? jid;
+      if (!target) throw new Error("Contato sem destino WhatsApp");
+
+      const setting = await this.prisma.setting.findFirst({ where: { crmClientId: scheduled.crmClientId, key: "wa_instance_name" } });
+      if (!setting) throw new Error("WhatsApp não conectado");
+      const result = await this.whatsapp.sendText(setting.value, target, scheduled.body);
+      const sentAt = new Date();
+      await this.prisma.$transaction([
+        this.prisma.message.create({
+          data: {
+            conversationId: scheduled.conversationId,
+            senderType: "agent",
+            senderName: "Agendado",
+            body: scheduled.body,
+            sentAt,
+            waMessageId: result.messageId ?? undefined
+          }
+        }),
+        this.prisma.conversation.update({
+          where: { id: scheduled.conversationId },
+          data: { lastMessagePreview: scheduled.body, lastMessageAt: sentAt, unreadCount: 0, status: "waiting_customer" }
+        }),
+        this.prisma.scheduledMessage.update({
+          where: { id: scheduled.id },
+          data: { status: "sent", sentAt, processingAt: null }
+        })
+      ]);
+    } catch (err) {
+      await this.prisma.scheduledMessage.updateMany({
+        where: { id: scheduled.id, status: "processing" },
+        data: { status: "failed", processingAt: null }
+      });
+      this.logger.error(`scheduled delivery failed id=${scheduled.id}: ${String(err)}`);
+      throw err;
+    }
   }
 }

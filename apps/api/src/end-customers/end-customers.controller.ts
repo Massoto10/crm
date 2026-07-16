@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { IsNumber, IsOptional, IsString, Min, MaxLength } from "class-validator";
-import { CurrentUser, JwtPayload } from "../auth/decorators";
+import { CurrentUser, JwtPayload, RequireView } from "../auth/decorators";
 import { EndCustomersService } from "./end-customers.service";
 
 class PatchEndCustomerDto {
@@ -19,6 +19,7 @@ class AddTaskDto {
 }
 
 @Controller("end-customers")
+@RequireView("contacts")
 export class EndCustomersController {
   constructor(private readonly svc: EndCustomersService) {}
 

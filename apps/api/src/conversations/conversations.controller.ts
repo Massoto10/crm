@@ -23,41 +23,29 @@ export class ConversationsController {
     @Query("agentId") agentId?: string,
     @Query("leadSourceId") leadSourceId?: string
   ) {
-    // Escopo: agente com permissão "own" só vê as próprias conversas; "all" vê todas
-    // do filtro. Admin sempre vê todas.
     const scope = user.permissions?.scope ?? "own";
     const effectiveAgentId = user.role !== "admin" && scope === "own" ? user.sub : agentId;
-    return this.conversationsService.findAll({
-      chatStatus, channel, departmentId, leadSourceId,
-      agentId: effectiveAgentId,
-      crmClientId: user.crmClientId
-    });
+    return this.conversationsService.findAll({ chatStatus, channel, departmentId, leadSourceId, agentId: effectiveAgentId, crmClientId: user.crmClientId });
   }
 
   @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.conversationsService.findOne(id);
+  findOne(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.conversationsService.findOne(id, user);
   }
 
   @Post("initiate")
   initiate(@CurrentUser() user: JwtPayload, @Body() body: InitiateConversationDto) {
-    return this.conversationsService.initiate({
-      ...body,
-      crmClientId: user.crmClientId,
-      firstMessage: body.firstMessage,
-      // Conversa criada manualmente pertence a quem a iniciou.
-      assignedAgentId: user.sub
-    });
+    return this.conversationsService.initiate({ ...body, crmClientId: user.crmClientId, assignedAgentId: user.sub });
   }
 
   @Post(":id/messages")
   createMessage(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: CreateMessageDto) {
-    return this.conversationsService.createAgentMessage(id, body.text, body.senderName ?? user.name ?? "Agente");
+    return this.conversationsService.createAgentMessage(id, body.text, user.name || "Agente", user);
   }
 
   @Post(":id/audio")
   createAudio(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: SendAudioDto) {
-    return this.conversationsService.createAgentAudio(id, body.audioBase64, body.mimetype ?? "audio/ogg", body.senderName ?? user.name ?? "Agente");
+    return this.conversationsService.createAgentAudio(id, body.audioBase64, body.mimetype ?? "audio/ogg", user.name || "Agente", user);
   }
 
   @Post(":id/media")
@@ -65,26 +53,26 @@ export class ConversationsController {
     return this.conversationsService.createAgentMedia(
       id,
       { base64: body.base64, mimetype: body.mimetype, mediatype: body.mediatype, fileName: body.fileName, caption: body.caption },
-      body.senderName ?? user.name ?? "Agente"
+      user.name || "Agente",
+      user
     );
   }
 
   @Put(":id/close")
-  close(@Param("id") id: string) {
-    return this.conversationsService.close(id);
+  close(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.conversationsService.close(id, user);
   }
 
   @Put(":id/assign")
-  assign(@Param("id") id: string, @Body() body: AssignAgentDto) {
-    return this.conversationsService.assign(id, body.agentId);
+  assign(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: AssignAgentDto) {
+    return this.conversationsService.assign(id, body.agentId, user);
   }
 
   @Put(":id/department")
-  setDepartment(@Param("id") id: string, @Body() body: SetDepartmentDto) {
-    return this.conversationsService.setDepartment(id, body.departmentId);
+  setDepartment(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: SetDepartmentDto) {
+    return this.conversationsService.setDepartment(id, body.departmentId, user);
   }
 
-  // Zona de risco: apaga TODAS as conversas da org. Admin only + exige confirm="confirmar".
   @Delete("all")
   @Roles("admin")
   clearAll(@CurrentUser() user: JwtPayload, @Body() body: { confirm?: string }) {

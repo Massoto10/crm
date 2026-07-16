@@ -5,11 +5,6 @@ import { IsCuid } from "../../common/validators/is-cuid";
 const CUID_RE = /^[a-z][a-z0-9_-]{5,39}$/i;
 
 export class BulkScheduledMessageDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(36)
-  crmClientId?: string; // sobrescrito pelo JWT no controller
-
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(500)

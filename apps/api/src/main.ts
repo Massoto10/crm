@@ -8,6 +8,9 @@ import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
+  const required = ["DATABASE_URL", "JWT_SECRET", "PROCESS_SECRET", "WA_WEBHOOK_TOKEN"];
+  const missing = required.filter((name) => !process.env[name]);
+  if (missing.length) throw new Error(`Variáveis obrigatórias ausentes: ${missing.join(", ")}`);
   const app = await NestFactory.create(AppModule);
 
   app.use(helmet());

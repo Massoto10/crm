@@ -3,10 +3,6 @@ import { IsCuid } from "../../common/validators/is-cuid";
 
 export class CreateQuickMessageDto {
   @IsString()
-  @MaxLength(36)
-  crmClientId!: string;
-
-  @IsString()
   @MaxLength(40)
   shortcut!: string;
 

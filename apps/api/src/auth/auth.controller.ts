@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common";
 import { AuthService } from "./auth.service";
-import { CurrentUser, JwtPayload, Public } from "./decorators";
+import { CurrentUser, JwtPayload, Public, Roles } from "./decorators";
 
 @Controller("auth")
 export class AuthController {
@@ -13,18 +13,19 @@ export class AuthController {
     return this.authService.login(body.email, body.password);
   }
 
-  @Public()
+  // Agent enrollment is an administrative action. The tenant always comes
+  // from the authenticated administrator, never from a browser-supplied id.
   @Post("register")
-  register(@Body() body: { name?: string; email?: string; password?: string; crmClientId?: string }) {
+  @Roles("admin")
+  register(@CurrentUser() user: JwtPayload, @Body() body: { name?: string; email?: string; password?: string }) {
     if (!body.name?.trim()) throw new BadRequestException("Nome obrigatório");
     if (!body.email?.trim()) throw new BadRequestException("Email obrigatório");
-    if (!body.password || body.password.length < 6) throw new BadRequestException("Senha deve ter ao menos 6 caracteres");
-    if (!body.crmClientId?.trim()) throw new BadRequestException("Organização obrigatória");
+    if (!body.password || body.password.length < 12) throw new BadRequestException("Senha deve ter ao menos 12 caracteres");
     return this.authService.register({
       name: body.name,
       email: body.email,
       password: body.password,
-      crmClientId: body.crmClientId
+      crmClientId: user.crmClientId
     });
   }
 

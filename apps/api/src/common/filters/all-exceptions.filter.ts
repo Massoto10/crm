@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from "@nestjs/common";
 import { Request, Response } from "express";
+import { redactUrl } from "../redact";
 
 /**
  * Captura TODA exceção não tratada, loga (warn em 4xx, error+stack em 5xx) e
@@ -27,7 +28,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = "Erro interno do servidor";
     }
 
-    const where = `${req.method} ${req.originalUrl}`;
+    const safePath = redactUrl(req.originalUrl);
+    const where = `${req.method} ${safePath}`;
     if (status >= 500) {
       const stack = exception instanceof Error ? exception.stack : String(exception);
       this.logger.error(`${status} ${where} -> ${exception instanceof Error ? exception.message : String(exception)}`, stack);
@@ -38,7 +40,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     res.status(status).json({
       statusCode: status,
       message,
-      path: req.originalUrl,
+      path: safePath,
       timestamp: new Date().toISOString()
     });
   }
