@@ -10,7 +10,6 @@ export class DepartmentsService {
   constructor(private readonly prisma: PrismaService) {}
 
   findAll(crmClientId: string) {
-    this.logger.log(`findAll departments crmClientId=${crmClientId}`);
     return this.prisma.department.findMany({
       where: { crmClientId, isActive: true },
       orderBy: { name: "asc" },
@@ -19,27 +18,35 @@ export class DepartmentsService {
   }
 
   create(crmClientId: string, name: string, permissions: object = {}) {
-    this.logger.log(`create department crmClientId=${crmClientId} name=${name}`);
     return this.prisma.department.create({
       data: { crmClientId, name, permissions: permissions as Prisma.InputJsonValue }
     });
   }
 
-  async update(id: string, data: { name?: string; permissions?: object; isActive?: boolean }) {
-    assertFound(await this.prisma.department.findUnique({ where: { id } }), "Departamento");
+  async update(id: string, data: { name?: string; permissions?: object; isActive?: boolean }, crmClientId: string) {
+    const department = await this.prisma.department.findFirst({ where: { id, crmClientId } });
+    assertFound(department, "Departamento");
     const { permissions, ...rest } = data;
-    const result = await this.prisma.department.update({
-      where: { id },
-      data: { ...rest, ...(permissions !== undefined ? { permissions: permissions as Prisma.InputJsonValue } : {}) }
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.department.update({
+        where: { id },
+        data: { ...rest, ...(permissions !== undefined ? { permissions: permissions as Prisma.InputJsonValue } : {}) }
+      });
+      // Permission and membership changes must revoke tokens that embed permissions.
+      await tx.agent.updateMany({ where: { departmentId: id }, data: { authVersion: { increment: 1 } } });
+      return updated;
     });
     this.logger.log(`updated department id=${id}`);
     return result;
   }
 
-  async remove(id: string) {
-    assertFound(await this.prisma.department.findUnique({ where: { id } }), "Departamento");
-    const result = await this.prisma.department.update({ where: { id }, data: { isActive: false } });
-    this.logger.log(`soft-deleted department id=${id}`);
-    return result;
+  async remove(id: string, crmClientId: string) {
+    const department = await this.prisma.department.findFirst({ where: { id, crmClientId } });
+    assertFound(department, "Departamento");
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.department.update({ where: { id }, data: { isActive: false } });
+      await tx.agent.updateMany({ where: { departmentId: id }, data: { authVersion: { increment: 1 } } });
+      return result;
+    });
   }
 }

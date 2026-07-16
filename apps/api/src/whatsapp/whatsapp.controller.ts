@@ -1,11 +1,13 @@
 import { BadRequestException, Body, Controller, Get, Logger, Param, Post, Delete, Query, UnauthorizedException } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
-import { Public, Roles } from "../auth/decorators";
+import { CurrentUser, JwtPayload, Public, Roles } from "../auth/decorators";
+import { assertCurrentTenant } from "../auth/tenant";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "./whatsapp.service";
 import { WhatsappWebhookService } from "./whatsapp-webhook.service";
 
 @Controller("whatsapp")
+@Roles("admin")
 export class WhatsappController {
   private readonly logger = new Logger(WhatsappController.name);
 
@@ -24,7 +26,7 @@ export class WhatsappController {
     const expected = process.env.WA_WEBHOOK_TOKEN;
     // Evolution pode anexar "/nome-do-evento" após a query string — compara só o primeiro segmento
     const received = token?.split("/")[0];
-    if (expected && received !== expected) {
+    if (received !== expected) {
       throw new UnauthorizedException("Token de webhook inválido");
     }
     // Não propaga erro: se a gravação falhar, logamos mas respondemos ok pra
@@ -38,7 +40,8 @@ export class WhatsappController {
   }
 
   @Get(":crmClientId/status")
-  async getStatus(@Param("crmClientId") crmClientId: string) {
+  async getStatus(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string) {
+    assertCurrentTenant(user, crmClientId);
     const [instanceSetting, statusSetting, qrSetting] = await Promise.all([
       this.prisma.setting.findFirst({ where: { crmClientId, key: "wa_instance_name" } }),
       this.prisma.setting.findFirst({ where: { crmClientId, key: "wa_status" } }),
@@ -80,7 +83,8 @@ export class WhatsappController {
 
   @Post(":crmClientId/connect")
   @Roles("admin")
-  async connect(@Param("crmClientId") crmClientId: string) {
+  async connect(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string) {
+    assertCurrentTenant(user, crmClientId);
     const instanceName = `crm-${crmClientId}`;
 
     if ((await this.prepareInstance(crmClientId, instanceName)) === "open") {
@@ -109,7 +113,8 @@ export class WhatsappController {
   // → Conectar com número de telefone.
   @Post(":crmClientId/connect-code")
   @Roles("admin")
-  async connectWithCode(@Param("crmClientId") crmClientId: string, @Body() body: { phone?: string }) {
+  async connectWithCode(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string, @Body() body: { phone?: string }) {
+    assertCurrentTenant(user, crmClientId);
     const phone = body?.phone?.trim();
     if (!phone) throw new BadRequestException("Número de telefone é obrigatório");
 
@@ -130,7 +135,8 @@ export class WhatsappController {
   }
 
   @Get(":crmClientId/qr")
-  async getQr(@Param("crmClientId") crmClientId: string) {
+  async getQr(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string) {
+    assertCurrentTenant(user, crmClientId);
     const qrSetting = await this.prisma.setting.findFirst({
       where: { crmClientId, key: "wa_qr" }
     });
@@ -139,7 +145,8 @@ export class WhatsappController {
 
   @Delete(":crmClientId/disconnect")
   @Roles("admin")
-  async disconnect(@Param("crmClientId") crmClientId: string) {
+  async disconnect(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string) {
+    assertCurrentTenant(user, crmClientId);
     const setting = await this.prisma.setting.findFirst({
       where: { crmClientId, key: "wa_instance_name" }
     });

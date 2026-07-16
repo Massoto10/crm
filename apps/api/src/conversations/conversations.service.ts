@@ -5,6 +5,7 @@ import { normalizeBrazilPhone } from "../common/phone";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "../whatsapp/whatsapp.service";
 import { InstagramService } from "../instagram/instagram.service";
+import type { JwtPayload } from "../auth/decorators";
 
 type ChatStatusFilter = "pending" | "active" | "closed";
 
@@ -31,9 +32,18 @@ interface InitiateDto {
 }
 
 const convInclude = {
-  crmClient: true,
+  crmClient: { select: { id: true, tradeName: true, status: true } },
   department: true,
-  assignedAgent: { include: { department: true } },
+  assignedAgent: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      departmentId: true,
+      department: { select: { id: true, name: true, isActive: true } }
+    }
+  },
   endCustomer: {
     include: {
       leadStatus: true,
@@ -54,6 +64,19 @@ export class ConversationsService {
     private readonly whatsapp: WhatsappService,
     private readonly instagram: InstagramService
   ) {}
+
+  private async assertConversationAccess(id: string, actor: JwtPayload) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id, crmClientId: actor.crmClientId },
+      select: { id: true, assignedAgentId: true }
+    });
+    if (!conversation) throw new NotFoundException("Conversa não encontrada");
+    const scope = actor.permissions?.scope ?? "own";
+    if (actor.role !== "admin" && scope === "own" && conversation.assignedAgentId !== actor.sub) {
+      throw new NotFoundException("Conversa não encontrada");
+    }
+    return conversation;
+  }
 
   findAll(filters: FindAllFilters = {}) {
     const where: Prisma.ConversationWhereInput = {};
@@ -80,17 +103,19 @@ export class ConversationsService {
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, actor: JwtPayload) {
+    await this.assertConversationAccess(id, actor);
     this.logger.log(`findOne conversationId=${id}`);
     const conv = await this.prisma.conversation.findUnique({
-      where: { id },
+      where: { id, crmClientId: actor.crmClientId },
       include: { ...convInclude, messages: { orderBy: { sentAt: "asc" } } }
     });
     if (!conv) throw new NotFoundException("Conversa não encontrada");
     return conv;
   }
 
-  async createAgentMessage(conversationId: string, text: string, senderName: string) {
+  async createAgentMessage(conversationId: string, text: string, senderName: string, actor?: JwtPayload) {
+    if (actor) await this.assertConversationAccess(conversationId, actor);
     const body = text?.trim();
     if (!body) throw new BadRequestException("Corpo da mensagem é obrigatório");
 
@@ -148,7 +173,8 @@ export class ConversationsService {
 
   // Mensagem de áudio do agente: guarda o áudio como data URI (mediaUrl) e envia
   // pelo WhatsApp. Mesma transição de status que createAgentMessage.
-  async createAgentAudio(conversationId: string, audioBase64: string, mimetype: string, senderName: string) {
+  async createAgentAudio(conversationId: string, audioBase64: string, mimetype: string, senderName: string, actor?: JwtPayload) {
+    if (actor) await this.assertConversationAccess(conversationId, actor);
     if (!audioBase64?.trim()) throw new BadRequestException("Áudio é obrigatório");
 
     const conv = await this.prisma.conversation.findUnique({
@@ -187,8 +213,10 @@ export class ConversationsService {
   async createAgentMedia(
     conversationId: string,
     opts: { base64: string; mimetype: string; mediatype: "image" | "video" | "document"; fileName?: string; caption?: string },
-    senderName: string
+    senderName: string,
+    actor?: JwtPayload
   ) {
+    if (actor) await this.assertConversationAccess(conversationId, actor);
     if (!opts.base64?.trim()) throw new BadRequestException("Arquivo é obrigatório");
 
     const conv = await this.prisma.conversation.findUnique({
@@ -254,7 +282,8 @@ export class ConversationsService {
     }
   }
 
-  async close(id: string) {
+  async close(id: string, actor: JwtPayload) {
+    await this.assertConversationAccess(id, actor);
     const conv = await this.prisma.conversation.findUnique({
       where: { id },
       select: { id: true, endCustomerId: true, crmClientId: true }
@@ -276,7 +305,8 @@ export class ConversationsService {
     return result;
   }
 
-  async assign(id: string, agentId: string) {
+  async assign(id: string, agentId: string, actor: JwtPayload) {
+    await this.assertConversationAccess(id, actor);
     const [conv, agent] = await Promise.all([
       this.prisma.conversation.findUnique({ where: { id }, select: { id: true, status: true, crmClientId: true } }),
       this.prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, crmClientId: true } })
@@ -295,7 +325,8 @@ export class ConversationsService {
     return result;
   }
 
-  async setDepartment(id: string, departmentId: string) {
+  async setDepartment(id: string, departmentId: string, actor: JwtPayload) {
+    await this.assertConversationAccess(id, actor);
     const [conv, dept] = await Promise.all([
       this.prisma.conversation.findUnique({ where: { id }, select: { id: true, crmClientId: true, assignedAgentId: true } }),
       this.prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, crmClientId: true } })

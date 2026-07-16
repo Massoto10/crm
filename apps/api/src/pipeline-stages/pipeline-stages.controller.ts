@@ -1,34 +1,33 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put } from "@nestjs/common";
 import { PipelineStagesService } from "./pipeline-stages.service";
 import { CreatePipelineStageDto } from "./dto/create-pipeline-stage.dto";
 import { UpdatePipelineStageDto } from "./dto/update-pipeline-stage.dto";
-import { Roles } from "../auth/decorators";
+import { CurrentUser, JwtPayload, Roles } from "../auth/decorators";
 
 @Controller("pipeline-stages")
 export class PipelineStagesController {
   constructor(private readonly pipelineStagesService: PipelineStagesService) {}
 
   @Get()
-  findAll(@Query("crmClientId") crmClientId: string) {
-    if (!crmClientId) throw new BadRequestException("crmClientId é obrigatório");
-    return this.pipelineStagesService.findAll(crmClientId);
+  findAll(@CurrentUser() user: JwtPayload) {
+    return this.pipelineStagesService.findAll(user.crmClientId);
   }
 
   @Post()
   @Roles("admin")
-  create(@Body() body: CreatePipelineStageDto) {
-    return this.pipelineStagesService.create(body);
+  create(@CurrentUser() user: JwtPayload, @Body() body: CreatePipelineStageDto) {
+    return this.pipelineStagesService.create({ ...body, crmClientId: user.crmClientId });
   }
 
   @Put(":id")
   @Roles("admin")
-  update(@Param("id") id: string, @Body() body: UpdatePipelineStageDto) {
-    return this.pipelineStagesService.update(id, body);
+  update(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: UpdatePipelineStageDto) {
+    return this.pipelineStagesService.update(id, body, user.crmClientId);
   }
 
   @Delete(":id")
   @Roles("admin")
-  remove(@Param("id") id: string) {
-    return this.pipelineStagesService.remove(id);
+  remove(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.pipelineStagesService.remove(id, user.crmClientId);
   }
 }

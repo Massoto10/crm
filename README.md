@@ -1,46 +1,44 @@
 # STN CRM
 
-Monorepo inicial do CRM com:
+Monorepo do CRM:
 
-- `apps/api`: backend Nest.js.
+- `apps/api`: API NestJS.
 - `apps/web`: frontend Next.js.
-- `packages/database`: Prisma schema, client e seed.
-- `docker-compose.yml`: Postgres local.
+- `packages/database`: schema, migrations e seed Prisma.
+- `docker-compose.yml`: PostgreSQL, Redis e Evolution para desenvolvimento local.
 
-## Setup
+## Desenvolvimento local
 
-1. Instale dependencias:
+1. Instale as dependências:
 
 ```bash
 npm install
 ```
 
-2. Crie o `.env` a partir do exemplo:
+2. Crie `.env` a partir de `.env.example` e substitua todos os valores de exemplo de segredos por valores aleatórios fortes. A API não inicia sem `JWT_SECRET`, `PROCESS_SECRET` e `WA_WEBHOOK_TOKEN`.
 
-```bash
-copy .env.example .env
-```
-
-3. Suba o Postgres:
+3. Suba a infraestrutura local:
 
 ```bash
 docker compose up -d
 ```
 
-4. Gere o Prisma Client:
+4. Gere o cliente Prisma e aplique as migrations:
 
 ```bash
 npm run db:generate
+npm run db:migrate
 ```
 
-5. Rode migration e seed:
+5. Opcionalmente, carregue dados de demonstração. Este comando apaga os dados existentes e exige confirmação explícita:
 
 ```bash
-npm run db:migrate
+$env:ALLOW_DESTRUCTIVE_SEED="true"
+$env:SEED_ADMIN_PASSWORD="uma-senha-forte-com-12-ou-mais-caracteres"
 npm run db:seed
 ```
 
-6. Rode API e web em terminais separados:
+6. Inicie API e web em terminais separados:
 
 ```bash
 npm run dev:api
@@ -51,26 +49,9 @@ API: `http://localhost:3333/api`
 
 Web: `http://localhost:3000`
 
-## Endpoints iniciais
+## Segurança e multiempresa
 
-- `GET /api/health`
-- `GET /api/crm-clients`
-- `GET /api/conversations`
-- `GET /api/conversations?channel=whatsapp`
-- `GET /api/conversations?channel=instagram`
-- `GET /api/conversations/:id`
-- `POST /api/conversations/:id/messages`
-
-## Modelo de dados
-
-`CrmClient` representa empresas que usam o CRM.
-
-`EndCustomer` representa clientes finais dessas empresas.
-
-`Label` classifica clientes finais por perfil, comportamento, negocio, risco e canal.
-
-`Conversation` liga cliente do CRM, cliente final e canal.
-
-`Message` guarda o historico da conversa.
-
-`Task` guarda proximas acoes.
+- A empresa ativa é sempre derivada do token JWT; o navegador não define o tenant.
+- Cadastros de atendentes são feitos por administradores autenticados.
+- Tokens são invalidados quando o usuário é desativado, tem senha, função ou departamento alterados.
+- Nunca versione `.env` ou tokens de webhooks.

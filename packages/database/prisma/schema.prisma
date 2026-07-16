@@ -92,6 +92,7 @@ enum UserRole {
 
 enum ScheduledMessageStatus {
   pending
+  processing
   sent
   failed
   canceled
@@ -164,6 +165,7 @@ model Agent {
   name          String
   email         String
   passwordHash  String?        @map("password_hash")
+  authVersion   Int            @default(0) @map("auth_version")
   role          UserRole       @default(agent)
   isActive      Boolean        @default(true) @map("is_active")
   createdAt     DateTime       @default(now()) @map("created_at")
@@ -374,6 +376,7 @@ model ScheduledMessage {
   body           String
   scheduledAt    DateTime               @map("scheduled_at")
   sentAt         DateTime?              @map("sent_at")
+  processingAt   DateTime?              @map("processing_at")
   status         ScheduledMessageStatus @default(pending)
   createdAt      DateTime               @default(now()) @map("created_at")
   updatedAt      DateTime               @updatedAt @map("updated_at")
@@ -382,6 +385,7 @@ model ScheduledMessage {
   endCustomer    EndCustomer?           @relation(fields: [endCustomerId], references: [id])
 
   @@index([scheduledAt, status])
+  @@index([status, processingAt])
   @@index([crmClientId])
   @@map("scheduled_messages")
 }

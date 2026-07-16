@@ -5,7 +5,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import { JwtPayload } from "./decorators";
 import { ADMIN_PERMISSIONS, normalizePermissions } from "./permissions";
 
-const jwtSecret = () => process.env.PROCESS_SECRET ?? "fallback-jwt-secret";
+const jwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET não configurado");
+  return secret;
+};
 
 @Injectable()
 export class AuthService {
@@ -14,17 +18,22 @@ export class AuthService {
   constructor(private readonly prisma: PrismaService) {}
 
   async login(email: string, password: string) {
-    const agent = await this.prisma.agent.findFirst({ where: { email: email.toLowerCase().trim(), isActive: true } });
-    if (!agent?.passwordHash) throw new UnauthorizedException("Credenciais inválidas");
-
-    let ok = false;
-    try {
-      ok = await bcrypt.compare(password, agent.passwordHash);
-    } catch (err) {
-      this.logger.error(`bcrypt.compare falhou agentId=${agent.id}: ${String(err)}`);
-      throw new UnauthorizedException("Credenciais inválidas");
+    const candidates = await this.prisma.agent.findMany({
+      where: { email: email.toLowerCase().trim(), isActive: true }
+    });
+    const matches = [] as typeof candidates;
+    for (const candidate of candidates) {
+      if (!candidate.passwordHash) continue;
+      try {
+        if (await bcrypt.compare(password, candidate.passwordHash)) matches.push(candidate);
+      } catch (err) {
+        this.logger.error(`bcrypt.compare falhou agentId=${candidate.id}: ${String(err)}`);
+      }
     }
-    if (!ok) throw new UnauthorizedException("Credenciais inválidas");
+    // Email is unique only inside a tenant. Refuse ambiguity rather than
+    // selecting an arbitrary tenant when the same credential exists twice.
+    if (matches.length !== 1) throw new UnauthorizedException("Credenciais inválidas");
+    const agent = matches[0];
 
     const token = await this.sign(agent);
     this.logger.log(`login agentId=${agent.id} role=${agent.role}`);
@@ -36,14 +45,7 @@ export class AuthService {
     const existing = await this.prisma.agent.findFirst({ where: { email, crmClientId: data.crmClientId } });
     if (existing) throw new ConflictException("Email já cadastrado nesta organização");
 
-    // Admin role can only be set via direct DB insert — register always creates agents
-    let passwordHash: string;
-    try {
-      passwordHash = await bcrypt.hash(data.password, 10);
-    } catch (err) {
-      this.logger.error(`bcrypt.hash falhou no register email=${email}: ${String(err)}`);
-      throw err;
-    }
+    const passwordHash = await bcrypt.hash(data.password, 10);
     const agent = await this.prisma.agent.create({
       data: { name: data.name.trim(), email, passwordHash, crmClientId: data.crmClientId, role: "agent" }
     });
@@ -60,25 +62,27 @@ export class AuthService {
     });
   }
 
-  private async sign(agent: { id: string; email: string; name: string; role: string; crmClientId: string; departmentId?: string | null }) {
-    // Admin tem acesso total; agente herda as permissões do seu departamento.
+  private async sign(agent: {
+    id: string; email: string; name: string; role: string; crmClientId: string;
+    departmentId?: string | null; authVersion: number;
+  }) {
     let permissions = ADMIN_PERMISSIONS;
     if (agent.role !== "admin") {
       const dept = agent.departmentId
-        ? await this.prisma.department.findUnique({ where: { id: agent.departmentId }, select: { permissions: true } })
+        ? await this.prisma.department.findFirst({ where: { id: agent.departmentId, isActive: true }, select: { permissions: true } })
         : null;
       permissions = normalizePermissions(dept?.permissions);
     }
     const payload: JwtPayload = {
-      sub: agent.id, email: agent.email, name: agent.name,
-      role: agent.role as "admin" | "agent", crmClientId: agent.crmClientId, permissions
+      sub: agent.id,
+      email: agent.email,
+      name: agent.name,
+      role: agent.role as "admin" | "agent",
+      crmClientId: agent.crmClientId,
+      permissions,
+      authVersion: agent.authVersion
     };
-    try {
-      return jwt.sign(payload, jwtSecret(), { expiresIn: "7d" });
-    } catch (err) {
-      this.logger.error(`jwt.sign falhou agentId=${agent.id}: ${String(err)}`);
-      throw err;
-    }
+    return jwt.sign(payload, jwtSecret(), { expiresIn: "15m" });
   }
 
   private toPublic(a: { id: string; name: string; email: string; role: string; crmClientId: string }) {

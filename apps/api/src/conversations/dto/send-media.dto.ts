@@ -22,9 +22,4 @@ export class SendMediaDto {
   @IsString()
   @MaxLength(2000)
   caption?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(80)
-  senderName?: string;
 }

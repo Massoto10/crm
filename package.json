@@ -16,10 +16,23 @@
     "db:seed": "npm run prisma:seed --workspace @stn-crm/database"
   },
   "devDependencies": {
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-express": "11.1.28",
     "playwright": "^1.60.0",
+    "postcss": "8.5.10",
+    "rxjs": "7.8.1",
     "typescript": "^5.5.4"
   },
   "dependencies": {
     "dotenv": "^17.4.2"
+  },
+  "overrides": {
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-express": "11.1.28",
+    "multer": "2.2.0",
+    "qs": "6.15.2",
+    "postcss": "8.5.10"
   }
 }

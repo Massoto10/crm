@@ -34,11 +34,11 @@ services:
       SERVER_URL: http://localhost:8080
       SERVER_PORT: "8080"
       # Auth
-      AUTHENTICATION_API_KEY: evo-secret-key-change-me
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina_EVOLUTION_API_KEY_no_arquivo_.env}
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
       # Webhook global → NestJS no host
       WEBHOOK_GLOBAL_ENABLED: "true"
-      WEBHOOK_GLOBAL_URL: http://host.docker.internal:3333/api/whatsapp/webhook?token=25857e95ed19a7906df42e9c39566f760b4a37fb5e38f130
+      WEBHOOK_GLOBAL_URL: http://host.docker.internal:3333/api/whatsapp/webhook?token=${WA_WEBHOOK_TOKEN:?defina_WA_WEBHOOK_TOKEN_no_arquivo_.env}
       WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
       # Database — usa o mesmo postgres, schema separado
       DATABASE_PROVIDER: postgresql

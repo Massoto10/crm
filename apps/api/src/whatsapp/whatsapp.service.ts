@@ -70,7 +70,7 @@ export class WhatsappService {
 
   async createInstance(instanceName: string, number?: string): Promise<EvoInstance> {
     const num = number ? normalizeBrazilPhone(number) : undefined;
-    this.logger.log(`createInstance name=${instanceName}${num ? ` number=${num}` : ""}`);
+    this.logger.log(`createInstance name=${instanceName}`);
     // Passar `number` na criação faz o Evolution devolver o pairingCode no connect.
     return this.req("POST", "/instance/create", {
       instanceName,
@@ -90,7 +90,7 @@ export class WhatsappService {
   // devolve um código (ex: "ABCD-EFGH") pra digitar no WhatsApp do celular.
   async requestPairingCode(instanceName: string, phone: string): Promise<{ pairingCode: string | null }> {
     const number = normalizeBrazilPhone(phone);
-    this.logger.log(`requestPairingCode name=${instanceName} number=${number}`);
+    this.logger.log(`requestPairingCode name=${instanceName}`);
     const data = await this.req<{ pairingCode?: string; code?: string }>(
       "GET",
       `/instance/connect/${instanceName}?number=${number}`
@@ -121,7 +121,7 @@ export class WhatsappService {
     // Pass a full JID as-is; otherwise normalize to E.164-BR (prefix 55) so Evolution
     // resolves the correct JID — BR numbers without the country code are rejected.
     const number = phone.includes("@") ? phone : normalizeBrazilPhone(phone);
-    this.logger.log(`sendText instance=${instanceName} to=${number}`);
+    this.logger.log(`sendText instance=${instanceName}`);
     const res = await this.req<{ key?: { id?: string; remoteJid?: string } }>("POST", `/message/sendText/${instanceName}`, {
       number,
       text

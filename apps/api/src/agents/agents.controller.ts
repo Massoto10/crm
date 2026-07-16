@@ -1,40 +1,39 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
 import { AgentsService } from "./agents.service";
 import { CreateAgentDto } from "./dto/create-agent.dto";
 import { UpdateAgentDto } from "./dto/update-agent.dto";
-import { Roles } from "../auth/decorators";
+import { CurrentUser, JwtPayload, Roles } from "../auth/decorators";
 
 @Controller("agents")
 export class AgentsController {
   constructor(private readonly agentsService: AgentsService) {}
 
   @Get()
-  findAll(@Query("crmClientId") crmClientId: string, @Query("departmentId") departmentId?: string) {
-    if (!crmClientId) throw new BadRequestException("crmClientId é obrigatório");
-    return this.agentsService.findAll(crmClientId, departmentId);
+  findAll(@CurrentUser() user: JwtPayload, @Query("departmentId") departmentId?: string) {
+    return this.agentsService.findAll(user.crmClientId, departmentId);
   }
 
   @Post()
   @Roles("admin")
-  create(@Body() body: CreateAgentDto) {
-    return this.agentsService.create(body);
+  create(@CurrentUser() user: JwtPayload, @Body() body: CreateAgentDto) {
+    return this.agentsService.create(user.crmClientId, body);
   }
 
   @Put(":id")
   @Roles("admin")
-  update(@Param("id") id: string, @Body() body: UpdateAgentDto) {
-    return this.agentsService.update(id, body);
+  update(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: UpdateAgentDto) {
+    return this.agentsService.update(id, body, user.crmClientId);
   }
 
   @Post(":id/reset-password")
   @Roles("admin")
-  resetPassword(@Param("id") id: string, @Body() body: { password?: string }) {
-    return this.agentsService.resetPassword(id, body?.password);
+  resetPassword(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: { password?: string }) {
+    return this.agentsService.resetPassword(id, body?.password, user.crmClientId);
   }
 
   @Delete(":id")
   @Roles("admin")
-  remove(@Param("id") id: string) {
-    return this.agentsService.remove(id);
+  remove(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.agentsService.remove(id, user.crmClientId);
   }
 }

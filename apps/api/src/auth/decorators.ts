@@ -18,6 +18,7 @@ export interface JwtPayload {
   name: string;
   role: "admin" | "agent";
   crmClientId: string;
+  authVersion?: number;
   permissions?: DeptPermissions;
   iat?: number;
   exp?: number;

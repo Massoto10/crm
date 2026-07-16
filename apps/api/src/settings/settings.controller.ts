@@ -1,21 +1,24 @@
 import { BadRequestException, Body, Controller, Get, Param, Put } from "@nestjs/common";
 import { SettingsService } from "./settings.service";
-import { Roles } from "../auth/decorators";
+import { CurrentUser, JwtPayload, Roles } from "../auth/decorators";
+import { assertCurrentTenant } from "../auth/tenant";
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 @Controller("settings")
+@Roles("admin")
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
   @Get(":crmClientId")
-  getAll(@Param("crmClientId") crmClientId: string) {
-    return this.settingsService.getAll(crmClientId);
+  getAll(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string) {
+    assertCurrentTenant(user, crmClientId);
+    return this.settingsService.getAll(user.crmClientId);
   }
 
   @Put(":crmClientId")
-  @Roles("admin")
-  upsert(@Param("crmClientId") crmClientId: string, @Body() body: Record<string, unknown>) {
+  upsert(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string, @Body() body: Record<string, unknown>) {
+    assertCurrentTenant(user, crmClientId);
     const sanitized: Record<string, string> = {};
     for (const [k, v] of Object.entries(body)) {
       if (FORBIDDEN_KEYS.has(k)) throw new BadRequestException(`Chave inválida: ${k}`);
@@ -24,6 +27,6 @@ export class SettingsController {
       if (v.length > 500) throw new BadRequestException(`Valor muito longo para a chave: ${k}`);
       sanitized[k] = v;
     }
-    return this.settingsService.upsert(crmClientId, sanitized);
+    return this.settingsService.upsert(user.crmClientId, sanitized);
   }
 }

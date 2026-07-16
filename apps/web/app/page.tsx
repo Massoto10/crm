@@ -1548,7 +1548,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     e.preventDefault();
     if (!firstCrmClientId || !deptName.trim()) return;
     try {
-      const res = await apiFetch(`${apiUrl}/api/departments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crmClientId: firstCrmClientId, name: deptName, permissions: newDeptPerms }) });
+      const res = await apiFetch(`${apiUrl}/api/departments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: deptName, permissions: newDeptPerms }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json(); setDepartments((prev) => [...prev, d]); setDeptName(""); setNewDeptPerms(DEFAULT_DEPT_PERMS);
       toast("Departamento criado", "success");
@@ -1579,7 +1579,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     e.preventDefault();
     if (!firstCrmClientId || !agentName.trim() || !agentEmail.trim()) return;
     try {
-      const res = await apiFetch(`${apiUrl}/api/agents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crmClientId: firstCrmClientId, name: agentName, email: agentEmail, role: agentRole, departmentId: agentDept || undefined }) });
+      const res = await apiFetch(`${apiUrl}/api/agents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: agentName, email: agentEmail, role: agentRole, departmentId: agentDept || undefined }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const a = await res.json(); setAgents((prev) => [...prev, a]); setAgentName(""); setAgentEmail("");
       if (a.tempPassword) setCredInfo({ name: a.name, email: a.email, password: a.tempPassword });
@@ -1611,7 +1611,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     e.preventDefault();
     if (!firstCrmClientId || !qmShortcut.trim() || !qmBody.trim()) return;
     try {
-      const res = await apiFetch(`${apiUrl}/api/quick-messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crmClientId: firstCrmClientId, shortcut: qmShortcut, title: qmTitle || qmShortcut, body: qmBody }) });
+      const res = await apiFetch(`${apiUrl}/api/quick-messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shortcut: qmShortcut, title: qmTitle || qmShortcut, body: qmBody }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const q = await res.json(); setQuickMessages((prev) => [...prev, q]); setQmShortcut(""); setQmTitle(""); setQmBody("");
       toast("Mensagem rapida criada", "success");
@@ -1630,7 +1630,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     e.preventDefault();
     if (!firstCrmClientId || !lsName.trim()) return;
     try {
-      const res = await apiFetch(`${apiUrl}/api/lead-statuses`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crmClientId: firstCrmClientId, name: lsName, color: lsColor, order: leadStatuses.length }) });
+      const res = await apiFetch(`${apiUrl}/api/lead-statuses`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: lsName, color: lsColor, order: leadStatuses.length }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const l = await res.json(); setLeadStatuses((prev) => [...prev, l]); setLsName("");
       toast("Status de lead criado", "success");
@@ -1651,7 +1651,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     try {
       const res = await apiFetch(`${apiUrl}/api/lead-sources`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ crmClientId: firstCrmClientId, name: srcName.trim(), color: srcColor, code: srcCode.trim() || undefined, order: leadSources.length })
+        body: JSON.stringify({ name: srcName.trim(), color: srcColor, code: srcCode.trim() || undefined, order: leadSources.length })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const s = await res.json(); setLeadSources((prev) => [...prev, s]); setSrcName(""); setSrcCode("");
@@ -1673,7 +1673,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
     try {
       const res = await apiFetch(`${apiUrl}/api/pipeline-stages`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ crmClientId: firstCrmClientId, name: stageName.trim(), color: stageColor, hint: stageHint.trim() || undefined, order: pipelineStages.length })
+        body: JSON.stringify({ name: stageName.trim(), color: stageColor, hint: stageHint.trim() || undefined, order: pipelineStages.length })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const s = await res.json(); setPipelineStages((prev) => [...prev, s]); setStageName(""); setStageHint("");
@@ -2427,7 +2427,7 @@ function ScheduleModal({ conversationId, crmClientId, onClose, onError }: { conv
     try {
       const res = await apiFetch(`${apiUrl}/api/scheduled-messages`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ crmClientId, conversationId, body, scheduledAt })
+        body: JSON.stringify({ conversationId, body, scheduledAt })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setDone(true);

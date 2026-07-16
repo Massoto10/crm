@@ -1,34 +1,33 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put } from "@nestjs/common";
 import { LeadSourcesService } from "./lead-sources.service";
 import { CreateLeadSourceDto } from "./dto/create-lead-source.dto";
 import { UpdateLeadSourceDto } from "./dto/update-lead-source.dto";
-import { Roles } from "../auth/decorators";
+import { CurrentUser, JwtPayload, Roles } from "../auth/decorators";
 
 @Controller("lead-sources")
 export class LeadSourcesController {
   constructor(private readonly leadSourcesService: LeadSourcesService) {}
 
   @Get()
-  findAll(@Query("crmClientId") crmClientId: string) {
-    if (!crmClientId) throw new BadRequestException("crmClientId é obrigatório");
-    return this.leadSourcesService.findAll(crmClientId);
+  findAll(@CurrentUser() user: JwtPayload) {
+    return this.leadSourcesService.findAll(user.crmClientId);
   }
 
   @Post()
   @Roles("admin")
-  create(@Body() body: CreateLeadSourceDto) {
-    return this.leadSourcesService.create(body);
+  create(@CurrentUser() user: JwtPayload, @Body() body: CreateLeadSourceDto) {
+    return this.leadSourcesService.create({ ...body, crmClientId: user.crmClientId });
   }
 
   @Put(":id")
   @Roles("admin")
-  update(@Param("id") id: string, @Body() body: UpdateLeadSourceDto) {
-    return this.leadSourcesService.update(id, body);
+  update(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: UpdateLeadSourceDto) {
+    return this.leadSourcesService.update(id, body, user.crmClientId);
   }
 
   @Delete(":id")
   @Roles("admin")
-  remove(@Param("id") id: string) {
-    return this.leadSourcesService.remove(id);
+  remove(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.leadSourcesService.remove(id, user.crmClientId);
   }
 }

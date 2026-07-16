@@ -3,13 +3,7 @@ import { ChannelType } from "@prisma/client";
 import { IsCuid } from "../../common/validators/is-cuid";
 
 export class InitiateConversationDto {
-  // Ignored — overridden by JWT crmClientId in the controller
-  @IsOptional()
-  @IsString()
-  @MaxLength(36)
-  crmClientId?: string;
-
-  // Either endCustomerId (existing contact) OR phone+customerName (new contact)
+  // Either endCustomerId (existing contact) OR phone+customerName (new contact).
   @IsOptional()
   @IsCuid()
   endCustomerId?: string;

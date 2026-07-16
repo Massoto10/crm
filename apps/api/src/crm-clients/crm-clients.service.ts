@@ -7,18 +7,11 @@ export class CrmClientsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    this.logger.log("findAll crm-clients");
-    return this.prisma.crmClient.findMany({
-      orderBy: { tradeName: "asc" },
-      include: {
-        _count: {
-          select: {
-            customers: true,
-            conversations: true
-          }
-        }
-      }
+  findCurrent(crmClientId: string) {
+    this.logger.log(`findCurrent crmClientId=${crmClientId}`);
+    return this.prisma.crmClient.findUnique({
+      where: { id: crmClientId },
+      select: { id: true, tradeName: true, legalName: true, planName: true, status: true }
     });
   }
 }

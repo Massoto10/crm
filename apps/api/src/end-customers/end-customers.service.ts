@@ -126,6 +126,12 @@ export class EndCustomersService {
     const customer = await this.prisma.endCustomer.findUnique({ where: { id }, select: { id: true, crmClientId: true } });
     assertFound(customer, "Cliente");
     if (customer.crmClientId !== crmClientId) throw new NotFoundException("Cliente não encontrado");
+    if (data.pipelineStageId) {
+      const stage = await this.prisma.pipelineStage.findFirst({
+        where: { id: data.pipelineStageId, crmClientId, isActive: true }
+      });
+      if (!stage) throw new BadRequestException("Etapa não encontrada nesta organização");
+    }
     return this.prisma.endCustomer.update({ where: { id }, data });
   }
 
