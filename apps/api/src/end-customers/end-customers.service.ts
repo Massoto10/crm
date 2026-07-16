@@ -32,7 +32,6 @@ export class EndCustomersService {
         companyName: true,
         phone: true,
         whatsappJid: true,
-        instagramHandle: true,
         email: true,
         leadTemperature: true,
         priority: true

@@ -18,7 +18,7 @@ function useToast() {
 
 type View = "dashboard" | "clients" | "chats" | "settings";
 type ChatStatus = "pending" | "active" | "closed";
-type Channel = "whatsapp" | "instagram";
+type Channel = "whatsapp";
 type PipelineStage = { id: string; name: string; color: string; hint: string; order: number };
 type ConvStatus = "pending" | "open" | "waiting_customer" | "waiting_agent" | "closed";
 
@@ -761,7 +761,6 @@ function DashboardView({
               <select className="filter-select" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}>
                 <option value="">Todas conexoes</option>
                 <option value="whatsapp">WhatsApp</option>
-                <option value="instagram">Instagram</option>
               </select>
               <input type="date" className="filter-select" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
               <input type="date" className="filter-select" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
@@ -1070,15 +1069,6 @@ function ChatsView({
                 {s === "pending" ? "Pendente" : s === "active" ? "Ativo" : "Fechado"}
               </button>
             ))}
-          </div>
-
-          <div className="channel-tabs" role="tablist">
-            <button className={`channel-tab ${channel === "whatsapp" ? "active" : ""}`} type="button" onClick={() => onChannelChange("whatsapp")}>
-              <span className="channel-icon wpp">W</span>WhatsApp
-            </button>
-            <button className={`channel-tab ${channel === "instagram" ? "active" : ""}`} type="button" onClick={() => onChannelChange("instagram")}>
-              <span className="channel-icon instagram">IG</span>Instagram
-            </button>
           </div>
 
           {showFilters && (
@@ -2164,7 +2154,7 @@ function SettingsView({ firstCrmClientId }: { firstCrmClientId: string | null })
 
 type ContactResult = {
   id: string; fullName: string; companyName: string | null;
-  phone: string | null; whatsappJid: string | null; instagramHandle: string | null;
+  phone: string | null; whatsappJid: string | null;
   email: string | null; leadTemperature: string; priority: string;
 };
 
@@ -2254,13 +2244,8 @@ function ProspeccaoModal({
         body.customerName = name.trim();
         body.companyName = company.trim() || undefined;
         body.email = email.trim() || undefined;
-        if (convChannel === "whatsapp") {
-          if (!phone.trim()) { onError("Informe o numero de WhatsApp"); setLoading(false); return; }
-          body.phone = phone.trim();
-        } else {
-          if (!phone.trim()) { onError("Informe o handle do Instagram"); setLoading(false); return; }
-          body.phone = phone.trim();
-        }
+        if (!phone.trim()) { onError("Informe o numero de WhatsApp"); setLoading(false); return; }
+        body.phone = phone.trim();
       }
       const res = await apiFetch(`${apiUrl}/api/conversations/initiate`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -2358,12 +2343,12 @@ function ProspeccaoModal({
                   <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" />
                 </label>
                 <label>
-                  {convChannel === "whatsapp" ? "Número WhatsApp *" : "Handle Instagram *"}
+                  Número WhatsApp *
                   <input
                     required
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder={convChannel === "whatsapp" ? "+55 11 99999-9999" : "@usuario"}
+                    placeholder="+55 11 99999-9999"
                   />
                 </label>
                 <div className="prosp-two-col">
@@ -2381,17 +2366,6 @@ function ProspeccaoModal({
 
             <fieldset className="prosp-fieldset">
               <legend>Conversa</legend>
-              <label>
-                Canal
-                <div className="channel-tabs" style={{ marginTop: 6 }}>
-                  {(["whatsapp", "instagram"] as Channel[]).map((c) => (
-                    <button key={c} type="button" className={`channel-tab ${convChannel === c ? "active" : ""}`} onClick={() => setConvChannel(c)}>
-                      <span className={`channel-icon ${c === "whatsapp" ? "wpp" : "instagram"}`}>{c === "whatsapp" ? "W" : "IG"}</span>
-                      {c === "whatsapp" ? "WhatsApp" : "Instagram"}
-                    </button>
-                  ))}
-                </div>
-              </label>
               <label>
                 Primeira mensagem <span style={{ color: "var(--muted)", fontWeight: 400 }}>(opcional)</span>
                 <textarea
@@ -2492,7 +2466,6 @@ function BulkScheduleModal({ crmClientId, endCustomerIds, onClose, onError, onDo
           <label>Canal
             <select value={channelType} onChange={(e) => setChannelType(e.target.value as Channel)}>
               <option value="whatsapp">WhatsApp</option>
-              <option value="instagram">Instagram</option>
             </select>
           </label>
           <label>Data e hora<input required type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></label>

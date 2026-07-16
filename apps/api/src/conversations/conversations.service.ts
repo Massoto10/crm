@@ -4,7 +4,6 @@ import { assertFound } from "../common/assert-found";
 import { normalizeBrazilPhone } from "../common/phone";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "../whatsapp/whatsapp.service";
-import { InstagramService } from "../instagram/instagram.service";
 import type { JwtPayload } from "../auth/decorators";
 
 type ChatStatusFilter = "pending" | "active" | "closed";
@@ -61,8 +60,7 @@ export class ConversationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly whatsapp: WhatsappService,
-    private readonly instagram: InstagramService
+    private readonly whatsapp: WhatsappService
   ) {}
 
   private async assertConversationAccess(id: string, actor: JwtPayload) {
@@ -121,7 +119,7 @@ export class ConversationsService {
 
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, status: true, channelType: true, crmClientId: true, endCustomerId: true, endCustomer: { select: { phone: true, whatsappJid: true, instagramHandle: true } } }
+      select: { id: true, status: true, channelType: true, crmClientId: true, endCustomerId: true, endCustomer: { select: { phone: true, whatsappJid: true } } }
     });
     assertFound(conv, "Conversa");
 
@@ -158,14 +156,6 @@ export class ConversationsService {
       // Prefer real phone number; fall back to @lid jid when phone = lid digits (real number unknown)
       const target = lidDigits && phone === lidDigits ? jid : phone ?? jid;
       this.sendWhatsappOutbound(conv.crmClientId, target, body, message.id, conv.endCustomerId);
-    } else if (conv.channelType === "instagram") {
-      const handle = conv.endCustomer?.instagramHandle ?? null;
-      if (handle) {
-        // Fire-and-forget — stub até as credenciais Meta serem plugadas (ver InstagramService)
-        this.instagram.sendText(handle, body).catch((err) => this.logger.error(`instagram outbound failed: ${err}`));
-      } else {
-        this.logger.warn(`instagram outbound skipped: sem instagramHandle convId=${conversationId}`);
-      }
     }
 
     return message;
@@ -179,7 +169,7 @@ export class ConversationsService {
 
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, status: true, channelType: true, crmClientId: true, endCustomerId: true, endCustomer: { select: { phone: true, whatsappJid: true, instagramHandle: true } } }
+      select: { id: true, status: true, channelType: true, crmClientId: true, endCustomerId: true, endCustomer: { select: { phone: true, whatsappJid: true } } }
     });
     assertFound(conv, "Conversa");
 
@@ -202,8 +192,6 @@ export class ConversationsService {
     if (conv.channelType === "whatsapp") {
       const target = this.resolveWhatsappTarget(conv.endCustomer);
       this.sendWhatsappAudioOutbound(conv.crmClientId, target, dataUri, message.id);
-    } else if (conv.channelType === "instagram") {
-      this.logger.warn(`instagram audio outbound nao suportado ainda convId=${conversationId}`);
     }
 
     return message;
@@ -221,7 +209,7 @@ export class ConversationsService {
 
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, status: true, channelType: true, crmClientId: true, endCustomerId: true, endCustomer: { select: { phone: true, whatsappJid: true, instagramHandle: true } } }
+      select: { id: true, status: true, channelType: true, crmClientId: true, endCustomerId: true, endCustomer: { select: { phone: true, whatsappJid: true } } }
     });
     assertFound(conv, "Conversa");
 
@@ -250,8 +238,6 @@ export class ConversationsService {
       this.sendWhatsappMediaOutbound(conv.crmClientId, target, message.id, {
         mediatype: opts.mediatype, base64: dataUri, mimetype: opts.mimetype, fileName: opts.fileName, caption: opts.caption
       });
-    } else if (conv.channelType === "instagram") {
-      this.logger.warn(`instagram media outbound nao suportado ainda convId=${conversationId}`);
     }
 
     return message;

@@ -98,7 +98,6 @@ async function main() {
       fullName: "Mariana Rocha",
       companyName: "Studio Rocha",
       phone: "+55 11 98888-1010",
-      instagramHandle: "@studio.rocha",
       email: "mariana@studiorocha.com.br",
       originChannel: "whatsapp",
       lifecycleStage: "proposal",
@@ -123,7 +122,6 @@ async function main() {
       fullName: "Lucas Almeida",
       companyName: "Almeida Foods",
       phone: "+55 21 97777-2020",
-      instagramHandle: "@almeidafoods",
       email: "lucas@almeidafoods.com.br",
       originChannel: "whatsapp",
       lifecycleStage: "qualified",
@@ -146,10 +144,10 @@ async function main() {
       id: "end_nina_prado",
       crmClientId: nina.id,
       fullName: "Nina Prado",
-      companyName: "@ninaprado.store",
-      instagramHandle: "@ninaprado.store",
+      companyName: "Nina Prado Store",
+      phone: "+55 31 96666-3030",
       email: "nina@ninaprado.com.br",
-      originChannel: "instagram",
+      originChannel: "whatsapp",
       lifecycleStage: "new",
       leadTemperature: "hot",
       priority: "high",
@@ -177,9 +175,9 @@ async function main() {
     ["end_customer", "Cliente", "Quase o mesmo, mas os responsaveis sao diferentes.", "2026-06-03T10:03:00-03:00"]
   ]);
 
-  await createConversation("conv_nina_ig", nina.id, ninaCustomer.id, "instagram", "Primeiro contato", [
+  await createConversation("conv_nina_wa", nina.id, ninaCustomer.id, "whatsapp", "Primeiro contato", [
     ["end_customer", "Cliente", "Ola! Vi o post e queria entender como funciona para loja online.", "2026-06-03T10:21:00-03:00"],
-    ["agent", "Agente", "Oi, Nina. Voce quer centralizar directs e WhatsApp em uma unica fila?", "2026-06-03T10:22:00-03:00"],
+    ["agent", "Agente", "Oi, Nina. Voce quer centralizar o atendimento em uma unica fila?", "2026-06-03T10:22:00-03:00"],
     ["end_customer", "Cliente", "Sim, principalmente para nao perder pergunta sobre produto.", "2026-06-03T10:24:00-03:00"]
   ]);
 
@@ -196,7 +194,7 @@ async function createConversation(
   id: string,
   crmClientId: string,
   endCustomerId: string,
-  channelType: "whatsapp" | "instagram",
+  channelType: "whatsapp",
   stage: string,
   messages: Array<[senderType: "agent" | "end_customer", senderName: string, body: string, sentAt: string]>
 ) {
@@ -209,7 +207,7 @@ async function createConversation(
       channelType,
       status: "waiting_agent",
       stage,
-      slaStatus: channelType === "instagram" ? "warning" : "on_time",
+      slaStatus: "on_time",
       lastMessagePreview: last[2],
       lastMessageAt: new Date(last[3]),
       unreadCount: 1,

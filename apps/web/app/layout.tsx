@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "STN CRM",
-  description: "CRM de atendimento para WhatsApp e Instagram"
+  description: "CRM de atendimento para WhatsApp"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

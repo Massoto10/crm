@@ -24,7 +24,6 @@ enum ClientClassification {
 
 enum ChannelType {
   whatsapp
-  instagram
   email
   site
   manual
@@ -245,7 +244,6 @@ model EndCustomer {
   companyName         String?                @map("company_name")
   phone               String?
   whatsappJid         String?                @map("whatsapp_jid")
-  instagramHandle     String?                @map("instagram_handle")
   email               String?
   documentNumber      String?                @map("document_number")
   originChannel       ChannelType            @map("origin_channel")
