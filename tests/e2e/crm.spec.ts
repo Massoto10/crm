@@ -295,6 +295,48 @@ test.describe("Regressao — lightbox nao pode abrir cortando a imagem", () => {
   });
 });
 
+test.describe("Regressao — nome do remetente e figurinha", () => {
+  test("mensagem do cliente mostra o nome cadastrado, nunca o telefone", async ({ page }) => {
+    await irParaChats(page);
+    await page.locator(".conversation-card").first().click();
+
+    const nomes = page.locator(".message:not(.agent) strong");
+    const total = await nomes.count();
+    expect(total).toBeGreaterThan(0);
+
+    for (let i = 0; i < total; i++) {
+      const txt = (await nomes.nth(i).textContent())?.trim() ?? "";
+      expect(txt, "remetente aparecendo como telefone").not.toMatch(/^\d{8,}$/);
+      expect(txt).toBe("Cliente Pendente");
+    }
+  });
+
+  test("figurinha renderiza como imagem, nao como texto [Figurinha]", async ({ page }) => {
+    await irParaChats(page);
+    await page.locator(".conversation-card").first().click();
+
+    const fig = page.locator(".msg-sticker");
+    await expect(fig).toHaveCount(1);
+    await expect(fig).toBeVisible();
+
+    // Carregou de verdade (nao e imagem quebrada).
+    const ok = await fig.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth > 0);
+    expect(ok, "figurinha nao carregou").toBe(true);
+
+    // E o placeholder textual nao pode aparecer.
+    await expect(page.locator(".message-thread")).not.toContainText("[Figurinha]");
+  });
+
+  test("figurinha abre no lightbox", async ({ page }) => {
+    await irParaChats(page);
+    await page.locator(".conversation-card").first().click();
+    await page.locator(".msg-sticker").click();
+    await expect(page.locator(".lightbox-overlay")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".lightbox-overlay")).toHaveCount(0);
+  });
+});
+
 test.describe("Feature 6 — toggle de som", () => {
   test("alterna mudo e persiste após reload", async ({ page }) => {
     await abrirSidebar(page);

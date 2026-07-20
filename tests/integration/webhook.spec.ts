@@ -207,6 +207,50 @@ describe("webhook inbound — mídia nasce completa e com mimetype certo", () =>
   });
 });
 
+describe("webhook — figurinha e nome do remetente", () => {
+  it("figurinha é baixada e gravada com mediaUrl, não fica só como texto", async () => {
+    await seedCustomer();
+    getMediaBase64.mockImplementation(
+      async (_i: string, _id: string, fallback: string) => ({ base64: "V0VCUA==", mimetype: fallback })
+    );
+
+    await webhook.handle(
+      upsertEvent({ waMessageId: "fig1", message: { stickerMessage: {} } }) as never
+    );
+
+    const msg = await prisma.message.findUnique({ where: { waMessageId: "fig1" } });
+    expect(msg?.mediaType).toBe("sticker");
+    expect(msg?.mediaUrl?.startsWith("data:image/webp;base64,")).toBe(true);
+    expect(getMediaBase64).toHaveBeenCalledWith("crm-cli_test", "fig1", "image/webp");
+  });
+
+  it("sem pushName, o remetente vira o nome cadastrado — não o telefone", async () => {
+    const cliente = await seedCustomer();
+    await prisma.endCustomer.update({ where: { id: cliente.id }, data: { fullName: "Paulo Test" } });
+
+    // Evolution as vezes nao manda pushName.
+    const ev = upsertEvent({ waMessageId: "nome1", message: { conversation: "oi" } });
+    delete (ev.data as { pushName?: string }).pushName;
+    await webhook.handle(ev as never);
+
+    const msg = await prisma.message.findUnique({ where: { waMessageId: "nome1" } });
+    expect(msg?.senderName).toBe("Paulo Test");
+    expect(msg?.senderName).not.toMatch(/^\d+$/);
+  });
+
+  it("com pushName, ele tem prioridade sobre o cadastro", async () => {
+    const cliente = await seedCustomer();
+    await prisma.endCustomer.update({ where: { id: cliente.id }, data: { fullName: "Nome Antigo" } });
+
+    await webhook.handle(
+      upsertEvent({ waMessageId: "nome2", message: { conversation: "oi" } }) as never
+    );
+
+    expect((await prisma.message.findUnique({ where: { waMessageId: "nome2" } }))?.senderName)
+      .toBe("Cliente Teste");
+  });
+});
+
 describe("webhook — idempotência", () => {
   it("reenvio do mesmo waMessageId não duplica mensagem nem contador", async () => {
     const cliente = await seedCustomer();

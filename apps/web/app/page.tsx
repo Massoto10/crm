@@ -1336,11 +1336,21 @@ function ChatsView({
               <div className="message-thread" ref={threadRef}>
                 {(selected.messages ?? []).map((msg) => (
                   <div key={msg.id} className={`message ${msg.senderType === "agent" ? "agent" : ""}`}>
-                    <strong>{msg.senderName}</strong>
+                    {/* Mensagem do cliente mostra o nome cadastrado, não o senderName
+                        gravado: quando o WhatsApp não manda pushName, o backend
+                        guardou o telefone. Resolver aqui conserta o histórico todo. */}
+                    <strong>{msg.senderType === "end_customer" ? selected.endCustomer.fullName : msg.senderName}</strong>
                     {msg.mediaType && !msg.mediaUrl ? (
                       <p>📎 Mídia (indisponível)</p>
                     ) : msg.mediaType === "audio" && msg.mediaUrl ? (
                       <audio controls preload="none" src={msg.mediaUrl} className="msg-audio" />
+                    ) : msg.mediaType === "sticker" && msg.mediaUrl ? (
+                      <img
+                        src={msg.mediaUrl}
+                        alt="Figurinha"
+                        className="msg-sticker"
+                        onClick={() => setLightbox({ src: msg.mediaUrl!, alt: "Figurinha" })}
+                      />
                     ) : msg.mediaType === "image" && msg.mediaUrl ? (
                       <>
                         <img

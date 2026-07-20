@@ -183,6 +183,17 @@ export async function seedE2E() {
       {
         conversationId: conv1.id,
         senderType: "end_customer",
+        // senderName gravado com o TELEFONE: e o caso real de quando o WhatsApp
+        // nao manda pushName. A tela precisa mostrar o nome cadastrado.
+        senderName: "5521900000001",
+        body: "[Figurinha]",
+        mediaType: "sticker",
+        mediaUrl: imagem,
+        sentAt: new Date(Date.now() - 150 * 1000)
+      },
+      {
+        conversationId: conv1.id,
+        senderType: "end_customer",
         senderName: "Cliente Pendente",
         body: "[Documento] contrato.pdf",
         mediaType: "document",

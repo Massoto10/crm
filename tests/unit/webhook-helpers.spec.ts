@@ -42,6 +42,10 @@ describe("detectMediaType", () => {
     expect(detectMediaType({ documentMessage: {} })).toBe("document");
   });
 
+  it("figurinha e midia, nao texto — senao nunca seria baixada nem exibida", () => {
+    expect(detectMediaType({ stickerMessage: {} })).toBe("sticker");
+  });
+
   it("texto não é mídia", () => {
     expect(detectMediaType({ conversation: "oi" })).toBeNull();
   });

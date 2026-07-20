@@ -1305,6 +1305,17 @@ h1 {
   object-fit: cover;
   cursor: pointer;
 }
+/* Figurinha: menor que foto e sem fundo/borda — o webp já vem com transparência. */
+.msg-sticker {
+  display: block;
+  margin-top: 4px;
+  width: 140px;
+  height: 140px;
+  object-fit: contain;
+  background: transparent;
+  cursor: pointer;
+}
+
 .msg-caption {
   margin-top: 6px;
   font-size: 13px;

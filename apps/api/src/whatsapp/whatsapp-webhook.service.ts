@@ -22,7 +22,7 @@ interface EvoMessageContent {
   videoMessage?: { caption?: string; mimetype?: string; contextInfo?: MsgContextInfo };
   audioMessage?: { mimetype?: string } & Record<string, unknown>;
   documentMessage?: { title?: string; fileName?: string; mimetype?: string };
-  stickerMessage?: Record<string, unknown>;
+  stickerMessage?: { mimetype?: string } & Record<string, unknown>;
   contactMessage?: { displayName?: string };
   locationMessage?: Record<string, unknown>;
   reactionMessage?: Record<string, unknown>;
@@ -87,7 +87,7 @@ export function extractText(msg: EvoMessageContent | undefined): string | null {
 }
 
 // Detecta o tipo de mídia (desembrulhando containers). null = texto/sem mídia.
-export function detectMediaType(msg: EvoMessageContent | undefined): "audio" | "image" | "video" | "document" | null {
+export function detectMediaType(msg: EvoMessageContent | undefined): "audio" | "image" | "video" | "document" | "sticker" | null {
   if (!msg) return null;
   const inner = msg.ephemeralMessage?.message ?? msg.viewOnceMessage?.message ?? msg.viewOnceMessageV2?.message;
   if (inner) return detectMediaType(inner);
@@ -95,6 +95,7 @@ export function detectMediaType(msg: EvoMessageContent | undefined): "audio" | "
   if (msg.imageMessage) return "image";
   if (msg.videoMessage) return "video";
   if (msg.documentMessage) return "document";
+  if (msg.stickerMessage) return "sticker";
   return null;
 }
 
@@ -109,6 +110,8 @@ export function detectMimetype(msg: EvoMessageContent | undefined): string | und
   if (msg.imageMessage) return msg.imageMessage.mimetype?.trim() || "image/jpeg";
   if (msg.videoMessage) return msg.videoMessage.mimetype?.trim() || "video/mp4";
   if (msg.documentMessage) return msg.documentMessage.mimetype?.trim() || "application/octet-stream";
+  // Figurinha do WhatsApp e webp (as animadas tambem).
+  if (msg.stickerMessage) return msg.stickerMessage.mimetype?.trim() || "image/webp";
   return undefined;
 }
 
@@ -267,7 +270,8 @@ export class WhatsappWebhookService {
         data: {
           conversationId: conv.id,
           senderType: "end_customer",
-          senderName: pushName ?? phone,
+          // pushName pode nao vir; cai no nome cadastrado antes de cair no numero
+          senderName: pushName ?? customer.fullName ?? phone,
           body: text,
           mediaType: mediaType ?? null,
           mediaUrl,
