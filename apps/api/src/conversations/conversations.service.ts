@@ -112,6 +112,15 @@ export class ConversationsService {
     return conv;
   }
 
+  // Zera o contador de não lidas quando o operador abre a conversa. Antes disso
+  // o badge só sumia ao responder, então conversa lida e não respondida ficava
+  // marcada pra sempre.
+  async markRead(id: string, actor: JwtPayload) {
+    await this.assertConversationAccess(id, actor);
+    await this.prisma.conversation.update({ where: { id }, data: { unreadCount: 0 } });
+    return { id, unreadCount: 0 };
+  }
+
   async createAgentMessage(conversationId: string, text: string, senderName: string, actor?: JwtPayload) {
     if (actor) await this.assertConversationAccess(conversationId, actor);
     const body = text?.trim();

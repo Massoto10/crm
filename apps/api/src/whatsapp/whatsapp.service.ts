@@ -171,7 +171,13 @@ export class WhatsappService {
   }
 
   // Baixa a mídia de uma mensagem recebida (áudio/imagem/etc) como base64.
-  async getMediaBase64(instanceName: string, messageKeyId: string): Promise<{ base64: string; mimetype: string } | null> {
+  // `fallbackMimetype` vem do payload do WhatsApp — sem ele, mídia que o Evolution
+  // devolve sem mimetype era carimbada como audio/ogg e o arquivo não abria.
+  async getMediaBase64(
+    instanceName: string,
+    messageKeyId: string,
+    fallbackMimetype = "application/octet-stream"
+  ): Promise<{ base64: string; mimetype: string } | null> {
     try {
       const res = await this.req<{ base64?: string; mimetype?: string }>(
         "POST",
@@ -179,7 +185,7 @@ export class WhatsappService {
         { message: { key: { id: messageKeyId } }, convertToMp4: false }
       );
       if (!res?.base64) return null;
-      return { base64: res.base64, mimetype: res.mimetype ?? "audio/ogg" };
+      return { base64: res.base64, mimetype: res.mimetype?.trim() || fallbackMimetype };
     } catch (err) {
       this.logger.warn(`getMediaBase64 falhou instance=${instanceName} id=${messageKeyId}: ${err}`);
       return null;

@@ -38,6 +38,11 @@ export class ConversationsController {
     return this.conversationsService.initiate({ ...body, crmClientId: user.crmClientId, assignedAgentId: user.sub });
   }
 
+  @Post(":id/read")
+  markRead(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
+    return this.conversationsService.markRead(id, user);
+  }
+
   @Post(":id/messages")
   createMessage(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: CreateMessageDto) {
     return this.conversationsService.createAgentMessage(id, body.text, user.name || "Agente", user);

@@ -11,6 +11,12 @@
     "dev:api": "npm run start:dev --workspace @stn-crm/api",
     "dev:web": "npm run dev --workspace @stn-crm/web",
     "build": "npm run build --workspace @stn-crm/api && npm run build --workspace @stn-crm/web",
+    "test": "vitest run tests/unit",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "test:db:up": "docker run -d --name crm-test-pg -e POSTGRES_PASSWORD=test -e POSTGRES_USER=test -e POSTGRES_DB=crm_test -p 55432:5432 postgres:16-alpine",
+    "test:db:down": "docker rm -f crm-test-pg",
     "db:generate": "npm run prisma:generate --workspace @stn-crm/database",
     "db:migrate": "npm run prisma:migrate --workspace @stn-crm/database",
     "db:seed": "npm run prisma:seed --workspace @stn-crm/database"
@@ -19,10 +25,12 @@
     "@nestjs/common": "11.1.28",
     "@nestjs/core": "11.1.28",
     "@nestjs/platform-express": "11.1.28",
+    "@playwright/test": "^1.61.1",
     "playwright": "^1.60.0",
     "postcss": "8.5.10",
     "rxjs": "7.8.1",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.7"
   },
   "dependencies": {
     "dotenv": "^17.4.2"

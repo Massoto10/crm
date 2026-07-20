@@ -22,3 +22,8 @@ Caddyfile
 vpsrun.py
 schema.sql
 seed.sql
+
+# artefatos de teste
+test-results
+playwright-report
+.next-e2e

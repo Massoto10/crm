@@ -1305,6 +1305,13 @@ h1 {
   object-fit: cover;
   cursor: pointer;
 }
+.msg-caption {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .msg-video {
   display: block;
   margin-top: 4px;
@@ -1557,6 +1564,100 @@ h1 {
 .modal-form select:focus,
 .modal-form textarea:focus {
   border-color: var(--accent);
+}
+
+/* ── Preview de anexo ── */
+.media-preview {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  max-height: 320px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.media-preview img,
+.media-preview video {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.media-preview-doc {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* ── Lightbox ── */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: grid;
+  place-items: center;
+  z-index: 300;
+}
+
+.lightbox-stage {
+  width: 96vw;
+  height: 92vh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center;
+  transition: transform 0.12s ease;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.lightbox-toolbar {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.75);
+  color: #fff;
+  z-index: 301;
+}
+
+.lightbox-toolbar span {
+  min-width: 52px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.lightbox-toolbar button {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lightbox-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 /* ── Settings ── */

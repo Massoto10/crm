@@ -17,10 +17,10 @@ interface MsgContextInfo {
 interface EvoMessageContent {
   conversation?: string;
   extendedTextMessage?: { text: string; contextInfo?: MsgContextInfo };
-  imageMessage?: { caption?: string; contextInfo?: MsgContextInfo };
-  videoMessage?: { caption?: string; contextInfo?: MsgContextInfo };
-  audioMessage?: Record<string, unknown>;
-  documentMessage?: { title?: string; fileName?: string };
+  imageMessage?: { caption?: string; mimetype?: string; contextInfo?: MsgContextInfo };
+  videoMessage?: { caption?: string; mimetype?: string; contextInfo?: MsgContextInfo };
+  audioMessage?: { mimetype?: string } & Record<string, unknown>;
+  documentMessage?: { title?: string; fileName?: string; mimetype?: string };
   stickerMessage?: Record<string, unknown>;
   contactMessage?: { displayName?: string };
   locationMessage?: Record<string, unknown>;
@@ -57,7 +57,12 @@ interface EvoQrcodeUpdated {
 
 type EvoEvent = EvoMessageUpsert | EvoConnectionUpdate | EvoQrcodeUpdated | { event: string };
 
-function extractText(msg: EvoMessageContent | undefined): string | null {
+// Janela de carência antes de uma mensagem do cliente devolver a conversa pra
+// "pendente". Se o operador respondeu há menos que isso, a conversa continua
+// "ativa" — evita ela pular de aba no meio de um papo em tempo real.
+export const AGENT_REPLY_GRACE_MS = 5 * 60 * 1000;
+
+export function extractText(msg: EvoMessageContent | undefined): string | null {
   if (!msg) return null;
 
   // Unwrap ephemeral / view-once containers (v2)
@@ -81,7 +86,7 @@ function extractText(msg: EvoMessageContent | undefined): string | null {
 }
 
 // Detecta o tipo de mídia (desembrulhando containers). null = texto/sem mídia.
-function detectMediaType(msg: EvoMessageContent | undefined): "audio" | "image" | "video" | "document" | null {
+export function detectMediaType(msg: EvoMessageContent | undefined): "audio" | "image" | "video" | "document" | null {
   if (!msg) return null;
   const inner = msg.ephemeralMessage?.message ?? msg.viewOnceMessage?.message ?? msg.viewOnceMessageV2?.message;
   if (inner) return detectMediaType(inner);
@@ -90,6 +95,29 @@ function detectMediaType(msg: EvoMessageContent | undefined): "audio" | "image" 
   if (msg.videoMessage) return "video";
   if (msg.documentMessage) return "document";
   return null;
+}
+
+// Mimetype declarado pelo próprio WhatsApp no payload. É a fonte mais confiável:
+// o Evolution às vezes devolve a mídia sem mimetype, e aí o arquivo salvo fica com
+// o content-type errado e não abre. Default por tipo quando o payload também omite.
+export function detectMimetype(msg: EvoMessageContent | undefined): string | undefined {
+  if (!msg) return undefined;
+  const inner = msg.ephemeralMessage?.message ?? msg.viewOnceMessage?.message ?? msg.viewOnceMessageV2?.message;
+  if (inner) return detectMimetype(inner);
+  if (msg.audioMessage) return msg.audioMessage.mimetype?.trim() || "audio/ogg";
+  if (msg.imageMessage) return msg.imageMessage.mimetype?.trim() || "image/jpeg";
+  if (msg.videoMessage) return msg.videoMessage.mimetype?.trim() || "video/mp4";
+  if (msg.documentMessage) return msg.documentMessage.mimetype?.trim() || "application/octet-stream";
+  return undefined;
+}
+
+// Nome do arquivo declarado no payload, quando houver.
+export function detectFileName(msg: EvoMessageContent | undefined): string | undefined {
+  if (!msg) return undefined;
+  const inner = msg.ephemeralMessage?.message ?? msg.viewOnceMessage?.message ?? msg.viewOnceMessageV2?.message;
+  if (inner) return detectFileName(inner);
+  const n = msg.documentMessage?.fileName ?? msg.documentMessage?.title;
+  return n?.trim() || undefined;
 }
 
 // Extrai a referência de anúncio (CTWA) da mensagem, desembrulhando containers.
@@ -113,13 +141,13 @@ function classifyAdSource(ad: ExternalAdReply): string {
   return "Anúncio Meta";
 }
 
-function cleanPhone(jid: string): string {
+export function cleanPhone(jid: string): string {
   return jid.replace(/@.+$/, "").replace(/\D/g, "");
 }
 
 // Evolution sometimes sends the literal string "Null"/"null" as profileName/pushName.
 // Treat those as absent so we don't store a contact/message named "Null".
-function cleanName(name: string | undefined): string | undefined {
+export function cleanName(name: string | undefined): string | undefined {
   const n = name?.trim();
   if (!n || n.toLowerCase() === "null" || n.toLowerCase() === "undefined") return undefined;
   return n;
@@ -201,6 +229,7 @@ export class WhatsappWebhookService {
     });
 
     const now = new Date();
+    const isNewConversation = !conv;
 
     if (!conv) {
       conv = await this.prisma.conversation.create({
@@ -219,6 +248,17 @@ export class WhatsappWebhookService {
     }
 
     const mediaType = detectMediaType(message);
+
+    // Baixa a mídia ANTES de criar a mensagem: se criasse antes, a mensagem
+    // apareceria no CRM como "anexo indisponível" até o download terminar e o
+    // próximo poll chegar. Assim ela já nasce completa.
+    let mediaUrl: string | null = null;
+    if (mediaType && waMessageId) {
+      const media = await this.whatsapp.getMediaBase64(ev.instance, waMessageId, detectMimetype(message));
+      if (media) mediaUrl = `data:${media.mimetype};base64,${media.base64}`;
+      else this.logger.warn(`${mediaType} inbound sem base64 waMessageId=${waMessageId}`);
+    }
+
     let createdId: string;
     try {
       const created = await this.prisma.message.create({
@@ -228,6 +268,7 @@ export class WhatsappWebhookService {
           senderName: pushName ?? phone,
           body: text,
           mediaType: mediaType ?? null,
+          mediaUrl,
           sentAt: now,
           waMessageId
         }
@@ -241,18 +282,21 @@ export class WhatsappWebhookService {
       }
       throw err;
     }
+    if (mediaUrl) this.logger.log(`${mediaType} inbound salvo msgId=${createdId}`);
 
-    // Mídia recebida: baixa do Evolution e guarda como data URI pra exibir/tocar no front.
-    if (mediaType && waMessageId) {
-      const media = await this.whatsapp.getMediaBase64(ev.instance, waMessageId);
-      if (media) {
-        await this.prisma.message
-          .update({ where: { id: createdId }, data: { mediaUrl: `data:${media.mimetype};base64,${media.base64}` } })
-          .then(() => this.logger.log(`${mediaType} inbound salvo msgId=${createdId}`))
-          .catch((e) => this.logger.warn(`falha ao salvar ${mediaType} inbound msgId=${createdId}: ${e}`));
-      } else {
-        this.logger.warn(`${mediaType} inbound sem base64 waMessageId=${waMessageId}`);
-      }
+    // Mensagem do cliente devolve a conversa pra "pendente" (fila de atendimento),
+    // exceto se o operador respondeu há pouco — aí ele está no papo e a conversa
+    // segue "ativa". Conversa recém-criada já nasce pendente.
+    let backToPending = false;
+    if (!isNewConversation && conv.status !== "pending") {
+      const lastAgentMsg = await this.prisma.message.findFirst({
+        where: { conversationId: conv.id, senderType: "agent" },
+        orderBy: { sentAt: "desc" },
+        select: { sentAt: true }
+      });
+      // Não dá pra usar conv.lastMessageAt: mensagem do cliente também bumpa esse
+      // campo, então um cliente mandando várias seguidas suprimiria a transição.
+      backToPending = !lastAgentMsg || now.getTime() - lastAgentMsg.sentAt.getTime() >= AGENT_REPLY_GRACE_MS;
     }
 
     await this.prisma.conversation.update({
@@ -260,9 +304,11 @@ export class WhatsappWebhookService {
       data: {
         lastMessagePreview: text.slice(0, 100),
         lastMessageAt: now,
-        unreadCount: { increment: 1 }
+        unreadCount: { increment: 1 },
+        ...(backToPending ? { status: "pending" as const } : {})
       }
     });
+    if (backToPending) this.logger.log(`conversation back to pending id=${conv.id}`);
 
     // Update customer last contact
     await this.prisma.endCustomer.update({
@@ -562,6 +608,15 @@ export class WhatsappWebhookService {
 
     const mediaType = detectMediaType(message);
     const now = new Date();
+
+    // Igual ao inbound: baixa antes de criar pra a mensagem não nascer quebrada.
+    let mediaUrl: string | null = null;
+    if (mediaType && waMessageId) {
+      const media = await this.whatsapp.getMediaBase64(instance, waMessageId, detectMimetype(message));
+      if (media) mediaUrl = `data:${media.mimetype};base64,${media.base64}`;
+      else this.logger.warn(`${mediaType} phone-sent sem base64 waMessageId=${waMessageId}`);
+    }
+
     let createdId: string;
     try {
       const created = await this.prisma.message.create({
@@ -571,6 +626,7 @@ export class WhatsappWebhookService {
           senderName: senderName ?? "Agente",
           body: text,
           mediaType: mediaType ?? null,
+          mediaUrl,
           sentAt: now,
           waMessageId
         }
@@ -584,14 +640,8 @@ export class WhatsappWebhookService {
       throw err;
     }
 
-    // Mídia enviada pelo celular do agente: baixa do Evolution pra exibir no CRM.
-    if (mediaType && waMessageId) {
-      const media = await this.whatsapp.getMediaBase64(instance, waMessageId);
-      if (media) {
-        await this.prisma.message
-          .update({ where: { id: createdId }, data: { mediaUrl: `data:${media.mimetype};base64,${media.base64}` } })
-          .catch((e) => this.logger.warn(`falha ao salvar ${mediaType} phone-sent msgId=${createdId}: ${e}`));
-      }
+    if (mediaUrl) {
+      this.logger.log(`${mediaType} phone-sent salvo msgId=${createdId}`);
     }
 
     await this.prisma.conversation.update({

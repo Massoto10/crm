@@ -1,6 +1,8 @@
 "use client";
 
 import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { downloadName, matchesChatStatus, mediaCaption } from "./lib/media";
+import type { ChatStatus, ConvStatus } from "./lib/media";
 
 type ToastEntry = { id: number; msg: string; type: "error" | "success" | "info" };
 
@@ -17,10 +19,8 @@ function useToast() {
 }
 
 type View = "dashboard" | "clients" | "chats" | "settings";
-type ChatStatus = "pending" | "active" | "closed";
 type Channel = "whatsapp";
 type PipelineStage = { id: string; name: string; color: string; hint: string; order: number };
-type ConvStatus = "pending" | "open" | "waiting_customer" | "waiting_agent" | "closed";
 
 type Label = { id: string; name: string; color: string; category: string };
 type Task = { id: string; title: string; status: "open" | "done" | "canceled" };
@@ -77,6 +77,68 @@ type DashMetrics = {
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3333";
 
+// Estado espelhado em localStorage. Não usa inicializador lazy do useState porque
+// a página é SSR-renderizada pelo Next e ler localStorage no render quebra a
+// hidratação — por isso hidrata num efeito de mount e só persiste depois disso.
+function usePersistedState<T>(
+  key: string,
+  initial: T,
+  parse: (raw: string) => T | null
+): [T, (v: T) => void, React.MutableRefObject<T>] {
+  const [value, setValue] = useState<T>(initial);
+  const hydrated = useRef(false);
+  const ref = useRef<T>(initial);
+  ref.current = value;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      const parsed = raw === null ? null : parse(raw);
+      if (parsed !== null) setValue(parsed);
+    } catch { /* localStorage indisponível (modo privado//quota) — segue com o default */ }
+    hydrated.current = true;
+  }, [key]);
+
+  useEffect(() => {
+    // Sem essa guarda o valor inicial sobrescreve o salvo antes da hidratação chegar.
+    if (!hydrated.current) return;
+    try { localStorage.setItem(key, String(value)); } catch { /* idem */ }
+  }, [key, value]);
+
+  return [value, setValue, ref];
+}
+
+// Bip de notificação via WebAudio — evita servir/commitar um arquivo de áudio.
+// Trocar por um .mp3 depois é mudança só desta função.
+let audioCtx: AudioContext | null = null;
+function ensureAudioCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return null;
+    if (!audioCtx) audioCtx = new Ctor();
+    if (audioCtx.state === "suspended") void audioCtx.resume();
+    return audioCtx;
+  } catch { return null; }
+}
+function playNotification() {
+  const ctx = ensureAudioCtx();
+  if (!ctx) return;
+  // Duas notas curtas ascendentes.
+  [0, 0.13].forEach((offset, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = i === 0 ? 740 : 988;
+    const t0 = ctx.currentTime + offset;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.18, t0 + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.13);
+  });
+}
 
 const VIEW_META: Array<{ key: ViewKey; label: string }> = [
   { key: "chats", label: "Chats" },
@@ -165,7 +227,16 @@ export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<JwtUser | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [channel, setChannel] = useState<Channel>("whatsapp");
-  const [chatStatus, setChatStatus] = useState<ChatStatus>("pending");
+  const [chatStatus, setChatStatus, chatStatusRef] = usePersistedState<ChatStatus>(
+    "stn_crm_chat_status",
+    "pending",
+    (raw) => (raw === "pending" || raw === "active" || raw === "closed" ? raw : null)
+  );
+  const [soundMuted, setSoundMuted, soundMutedRef] = usePersistedState<boolean>(
+    "stn_crm_sound_muted",
+    false,
+    (raw) => (raw === "true" ? true : raw === "false" ? false : null)
+  );
   const [filterDeptId, setFilterDeptId] = useState<string>("");
   const [filterSourceId, setFilterSourceId] = useState<string>("");
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
@@ -192,6 +263,26 @@ export default function HomePage() {
   // When set, the next conversations load selects this id instead of data[0]
   // (used to open a just-created conversation after Nova conversa).
   const pendingSelectRef = useRef<string | null>(null);
+  // Espelho de `conversations` pra efeitos lerem a lista sem depender dela —
+  // depender do array faz o efeito refazer a cada poll (identidade nova).
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  // id -> unreadCount do poll anterior. null = ainda não semeado (primeiro load
+  // não toca som).
+  const prevUnreadRef = useRef<Map<string, number> | null>(null);
+  // id -> quando o mark-as-read foi disparado, pra descartar contador velho de
+  // um poll que já estava em voo.
+  const readAtRef = useRef<Map<string, number>>(new Map());
+  // Para de tentar marcar como lida depois de 2 falhas seguidas.
+  const readFailRef = useRef<Map<string, number>>(new Map());
+  // Registra o clique do operador numa conversa. Precisa ser ESTADO, não ref: a
+  // primeira conversa já vem auto-selecionada, então clicar nela não muda o
+  // selectedId — sem uma dependência que muda, o efeito de mark-as-read não
+  // re-executa e a conversa do topo nunca seria marcada como lida.
+  // `tick` incrementa a cada clique pra distinguir cliques repetidos no mesmo id.
+  const [userSelection, setUserSelection] = useState<{ id: string; tick: number } | null>(null);
+  // Não lidas da conversa aberta — dispara o mark-as-read quando passa de 0.
+  const selectedUnread = conversations.find((c) => c.id === selectedId)?.unreadCount ?? 0;
 
   // Auth check — runs once on mount
   useEffect(() => {
@@ -256,8 +347,16 @@ export default function HomePage() {
         const data = (await res.json()) as Conversation[];
         setConversations(data);
         setClients(buildClients(data));
+        // Semeia a baseline do som já no load — senão o primeiro poll só
+        // semearia 8s depois e uma mensagem nesse intervalo passaria batida.
+        prevUnreadRef.current = new Map(data.map((c) => [c.id, c.unreadCount]));
         const want = pendingSelectRef.current;
-        const pick = want && data.some((c) => c.id === want) ? want : (data[0]?.id ?? null);
+        // Prefere a primeira conversa da aba visível — senão, com a aba restaurada
+        // em "Fechado" o auto-select cairia numa conversa fora da lista exibida.
+        const fallback = data.find((c) => matchesChatStatus(c.status, chatStatusRef.current)) ?? data[0];
+        const pick = want && data.some((c) => c.id === want) ? want : (fallback?.id ?? null);
+        // Auto-seleção não é clique do operador — não deve marcar como lida.
+        setUserSelection(null);
         setSelectedId(pick);
         if (want) pendingSelectRef.current = null;
       } catch (err) {
@@ -269,7 +368,10 @@ export default function HomePage() {
       setIsLoading(false);
     }
     load();
-  }, [view, channel, filterDeptId, filterSourceId, firstCrmClientId]);
+    // Sem `view` nas deps: refazer o load a cada troca de tela reseta o selectedId
+    // (e, com o mark-as-read, zeraria o badge da primeira conversa sem ninguém ler).
+    // O poll global mantém a lista fresca; refreshConversations() cobre o refresh manual.
+  }, [channel, filterDeptId, filterSourceId, firstCrmClientId]);
 
   useEffect(() => {
     if (view !== "chats" || !firstCrmClientId) return;
@@ -296,9 +398,11 @@ export default function HomePage() {
       .then((d) => setDetail(d as Conversation))
       .catch((err) => {
         console.error(`[conversation] load failed id=${selectedId}:`, err);
-        setDetail(conversations.find((c) => c.id === selectedId) ?? null);
+        setDetail(conversationsRef.current.find((c) => c.id === selectedId) ?? null);
       });
-  }, [selectedId, conversations]);
+    // Sem `conversations` nas deps: cada poll da lista troca a identidade do array
+    // e dispararia um fetch de detalhe completo (que carrega base64 das mídias).
+  }, [selectedId]);
 
   // Poll open conversation for new incoming messages every 4s
   useEffect(() => {
@@ -312,24 +416,81 @@ export default function HomePage() {
     return () => clearInterval(id);
   }, [selectedId, view]);
 
-  // Poll conversation list for new messages/conversations every 8s
+  // Poll da lista — roda em TODA tela, senão não há como avisar de mensagem nova
+  // fora dos chats. O payload da lista não traz mensagens/base64 (ver convInclude
+  // em conversations.service.ts), então o custo é baixo.
   useEffect(() => {
-    if (view !== "chats" || !firstCrmClientId) return;
+    if (!firstCrmClientId) return;
     const crmClientId = firstCrmClientId;
     const id = setInterval(() => {
       const params = new URLSearchParams({ channel, crmClientId });
       if (filterDeptId) params.set("departmentId", filterDeptId);
       if (filterSourceId) params.set("leadSourceId", filterSourceId);
+      const startedAt = Date.now();
       apiFetch(`${apiUrl}/api/conversations?${params}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-        .then((data) => {
-          setConversations(data as Conversation[]);
-          setClients(buildClients(data as Conversation[]));
+        .then((raw) => {
+          const data = raw as Conversation[];
+
+          // A ordem aqui importa. 1) diff contra os dados CRUS pra decidir o som.
+          const prev = prevUnreadRef.current;
+          if (prev) {
+            const isNew = data.some((c) => c.unreadCount > (prev.get(c.id) ?? 0));
+            if (isNew && !soundMutedRef.current) playNotification();
+          }
+          // 2) semeia com os valores CRUS (não os pós-guarda), senão o próximo
+          // poll volta a ver 1 > 0 e toca de novo a cada ciclo.
+          prevUnreadRef.current = new Map(data.map((c) => [c.id, c.unreadCount]));
+
+          // 3) guarda contra ressurreição: se o mark-as-read foi disparado depois
+          // que este fetch saiu, o contador que voltou está velho.
+          const merged = data.map((c) => {
+            const readAt = readAtRef.current.get(c.id);
+            return readAt && readAt > startedAt ? { ...c, unreadCount: 0 } : c;
+          });
+
+          setConversations(merged);
+          setClients(buildClients(merged));
         })
         .catch((err) => console.error("[poll list] falhou:", err));
-    }, 8000);
+    }, view === "chats" ? 8000 : 15000);
     return () => clearInterval(id);
-  }, [view, channel, filterDeptId, filterSourceId, firstCrmClientId]);
+  }, [view, channel, filterDeptId, filterSourceId, firstCrmClientId, soundMutedRef]);
+
+  // Marca como lida ao abrir a conversa. Auto-limitante: só dispara com unread > 0,
+  // e a escrita otimista logo abaixo torna a condição falsa na hora.
+  // Só conta clique do operador: a lista auto-seleciona a primeira conversa ao
+  // carregar, e isso não é "visualizar" — senão a do topo da fila perderia o
+  // badge toda vez que alguém entra na aba pra triar.
+  useEffect(() => {
+    if (!userSelection || userSelection.id !== selectedId) return;
+    if (view !== "chats" || !selectedId || selectedUnread === 0) return;
+    if ((readFailRef.current.get(selectedId) ?? 0) >= 2) return;
+    const id = selectedId;
+    readAtRef.current.set(id, Date.now());
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)));
+    apiFetch(`${apiUrl}/api/conversations/${id}/read`, { method: "POST" })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        readFailRef.current.delete(id);
+      })
+      .catch((err) => {
+        // Sem isso, o poll restaura o contador e o efeito redispara em loop.
+        readFailRef.current.set(id, (readFailRef.current.get(id) ?? 0) + 1);
+        console.error(`[mark read] id=${id} falhou:`, err);
+      });
+  }, [selectedId, selectedUnread, view, userSelection]);
+
+  // AudioContext nasce suspenso até um gesto do usuário (política de autoplay).
+  useEffect(() => {
+    const unlock = () => { ensureAudioCtx(); };
+    document.addEventListener("pointerdown", unlock, { once: true });
+    document.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      document.removeEventListener("pointerdown", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+  }, []);
 
   const selected = useMemo(
     () => detail ?? conversations.find((c) => c.id === selectedId) ?? null,
@@ -351,7 +512,12 @@ export default function HomePage() {
         setConversations(data);
         setClients(buildClients(data));
         const want = pendingSelectRef.current;
-        const pick = want && data.some((c) => c.id === want) ? want : (data[0]?.id ?? null);
+        // Prefere a primeira conversa da aba visível — senão, com a aba restaurada
+        // em "Fechado" o auto-select cairia numa conversa fora da lista exibida.
+        const fallback = data.find((c) => matchesChatStatus(c.status, chatStatusRef.current)) ?? data[0];
+        const pick = want && data.some((c) => c.id === want) ? want : (fallback?.id ?? null);
+        // Auto-seleção não é clique do operador — não deve marcar como lida.
+        setUserSelection(null);
         setSelectedId(pick);
         if (want) pendingSelectRef.current = null;
       })
@@ -485,7 +651,7 @@ export default function HomePage() {
     }
   }
 
-  async function sendMedia(file: File) {
+  async function sendMedia(file: File, caption?: string) {
     if (!selected) return;
     const mediatype: "image" | "video" | "document" = file.type.startsWith("image/")
       ? "image" : file.type.startsWith("video/") ? "video" : "document";
@@ -498,7 +664,10 @@ export default function HomePage() {
       });
       const res = await apiFetch(`${apiUrl}/api/conversations/${selected.id}/media`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ base64, mimetype: file.type || "application/octet-stream", mediatype, fileName: file.name })
+        body: JSON.stringify({
+          base64, mimetype: file.type || "application/octet-stream", mediatype, fileName: file.name,
+          ...(caption?.trim() ? { caption: caption.trim() } : {})
+        })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const conv = await apiFetch(`${apiUrl}/api/conversations/${selected.id}`);
@@ -639,6 +808,15 @@ export default function HomePage() {
               <span>{currentUser.role === "admin" ? "Admin" : "SDR"}</span>
             </div>
           </div>
+          {/* Desmutar serve de gesto pra liberar o autoplay do AudioContext. */}
+          <button
+            className="logout-btn"
+            type="button"
+            onClick={() => { const next = !soundMuted; setSoundMuted(next); if (!next) { ensureAudioCtx(); playNotification(); } }}
+            title={soundMuted ? "Ativar som de notificação" : "Silenciar notificações"}
+          >
+            {soundMuted ? "🔇" : "🔔"}
+          </button>
           <button className="logout-btn" type="button" onClick={logout} title="Sair">↩</button>
         </div>
       </aside>
@@ -665,7 +843,7 @@ export default function HomePage() {
             showFilters={showFilters} showQuickPicker={showQuickPicker} filteredQuick={filteredQuick}
             onChannelChange={setChannel} onChatStatusChange={setChatStatus}
             onFilterDeptChange={setFilterDeptId} onToggleFilters={() => setShowFilters((s) => !s)}
-            onReplyChange={handleReplyChange} onSelectConversation={setSelectedId}
+            onReplyChange={handleReplyChange} onSelectConversation={(id) => { setUserSelection((p) => ({ id, tick: (p?.tick ?? 0) + 1 })); setSelectedId(id); }}
             onClearSelection={() => setSelectedId(null)}
             onSubmitReply={submitReply} onClose={closeConversation} onAssignAgent={assignAgent}
             onInsertQuickMessage={insertQuickMessage} onNewConversation={() => setShowProspeccaoModal(true)}
@@ -1001,7 +1179,7 @@ function ChatsView({
   onClose: (id: string) => void; onAssignAgent: (convId: string, agentId: string) => void;
   onInsertQuickMessage: (body: string) => void; onNewConversation: () => void; onSchedule: () => void;
   onSendAudio: (audioBase64: string, mimetype: string) => void;
-  onSendMedia: (file: File) => void;
+  onSendMedia: (file: File, caption?: string) => void;
   onPatchCustomer: (id: string, data: { estimatedValueCents?: number; assignedTo?: string | null }) => Promise<void>;
   onError: (msg: string) => void;
   onAddCustomerLabel: (endCustomerId: string, name: string) => void;
@@ -1014,12 +1192,11 @@ function ChatsView({
   const active = conversations.filter((c) => ["open", "waiting_customer", "waiting_agent"].includes(c.status)).length;
   const closed = conversations.filter((c) => c.status === "closed").length;
   // Lista da inbox filtrada pela aba selecionada (dados já vêm com todos os status).
-  const visible = conversations.filter((c) =>
-    chatStatus === "pending" ? c.status === "pending"
-      : chatStatus === "closed" ? c.status === "closed"
-        : ["open", "waiting_customer", "waiting_agent"].includes(c.status));
+  const visible = conversations.filter((c) => matchesChatStatus(c.status, chatStatus));
 
   const threadRef = useRef<HTMLDivElement>(null);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const [pendingMedia, setPendingMedia] = useState<File | null>(null);
   const [editingEstimatedValue, setEditingEstimatedValue] = useState(false);
   const [editValueStr, setEditValueStr] = useState("");
   const [editingAssignedTo, setEditingAssignedTo] = useState(false);
@@ -1152,11 +1329,22 @@ function ChatsView({
                     ) : msg.mediaType === "audio" && msg.mediaUrl ? (
                       <audio controls preload="none" src={msg.mediaUrl} className="msg-audio" />
                     ) : msg.mediaType === "image" && msg.mediaUrl ? (
-                      <a href={msg.mediaUrl} target="_blank" rel="noreferrer"><img src={msg.mediaUrl} alt={msg.body} className="msg-image" /></a>
+                      <>
+                        <img
+                          src={msg.mediaUrl}
+                          alt={mediaCaption(msg.body) ?? "Imagem"}
+                          className="msg-image"
+                          onClick={() => setLightbox({ src: msg.mediaUrl!, alt: mediaCaption(msg.body) ?? "Imagem" })}
+                        />
+                        {mediaCaption(msg.body) && <p className="msg-caption">{mediaCaption(msg.body)}</p>}
+                      </>
                     ) : msg.mediaType === "video" && msg.mediaUrl ? (
-                      <video controls preload="none" src={msg.mediaUrl} className="msg-video" />
+                      <>
+                        <video controls preload="none" src={msg.mediaUrl} className="msg-video" />
+                        {mediaCaption(msg.body) && <p className="msg-caption">{mediaCaption(msg.body)}</p>}
+                      </>
                     ) : msg.mediaType === "document" && msg.mediaUrl ? (
-                      <a href={msg.mediaUrl} download={msg.body?.replace(/^\[Documento\]\s*/, "") || "arquivo"} className="msg-doc">📎 {msg.body?.replace(/^\[Documento\]\s*/, "") || "Baixar arquivo"}</a>
+                      <a href={msg.mediaUrl} download={downloadName(msg.body, msg.mediaUrl)} className="msg-doc">📎 {msg.body?.replace(/^\[Documento\]\s*/, "") || "Baixar arquivo"}</a>
                     ) : (
                       <p>{msg.body}</p>
                     )}
@@ -1178,7 +1366,8 @@ function ChatsView({
                 <div className="reply-toolbar">
                   <button type="button" className="reply-tool-btn" onClick={onSchedule} title="Agendar mensagem">📅 Agendar</button>
                   <AudioRecorder onSend={onSendAudio} onError={onError} />
-                  <MediaAttach onSelect={onSendMedia} onError={onError} />
+                  {/* Não envia direto: abre preview pra permitir legenda. */}
+                  <MediaAttach onSelect={setPendingMedia} onError={onError} />
                 </div>
                 <form className="reply-box" onSubmit={onSubmitReply}>
                   <textarea
@@ -1370,6 +1559,138 @@ function ChatsView({
           <div className="empty-state large">Selecione uma conversa.</div>
         )}
       </section>
+      {lightbox && <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={() => setLightbox(null)} />}
+      {pendingMedia && (
+        <MediaPreviewModal
+          file={pendingMedia}
+          onClose={() => setPendingMedia(null)}
+          onSend={(caption) => { onSendMedia(pendingMedia, caption); setPendingMedia(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Preview do anexo antes de enviar, com campo de legenda.
+function MediaPreviewModal({ file, onClose, onSend }: { file: File; onClose: () => void; onSend: (caption?: string) => void }) {
+  const [caption, setCaption] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const isImage = file.type.startsWith("image/");
+  const isVideo = file.type.startsWith("video/");
+
+  useEffect(() => {
+    if (!isImage && !isVideo) return;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImage, isVideo]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Enviar anexo</h2>
+          <button type="button" className="icon-btn" onClick={onClose}>✕</button>
+        </div>
+        <form className="modal-form" onSubmit={(e) => { e.preventDefault(); onSend(caption); }}>
+          <div className="media-preview">
+            {isImage && previewUrl ? <img src={previewUrl} alt={file.name} />
+              : isVideo && previewUrl ? <video src={previewUrl} controls preload="metadata" />
+                : <p className="media-preview-doc">📎 {file.name}</p>}
+          </div>
+          <label>Legenda (opcional)
+            <input
+              autoFocus
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              placeholder="Escreva uma legenda..."
+            />
+          </label>
+          <button className="primary-button" type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Visualizador de imagem em tela cheia com zoom e pan. Sem dependência externa.
+function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const stageRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+
+  const clamp = (z: number) => Math.min(5, Math.max(0.25, Math.round(z * 100) / 100));
+  const applyZoom = useCallback((next: number) => {
+    const z = clamp(next);
+    setZoom(z);
+    if (z <= 1) setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Escape fecha e o scroll do body trava enquanto o lightbox está aberto.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "+" || e.key === "=") applyZoom(zoom + 0.25);
+      if (e.key === "-") applyZoom(zoom - 0.25);
+      if (e.key === "0") { setZoom(1); setPan({ x: 0, y: 0 }); }
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose, applyZoom, zoom]);
+
+  // O React registra wheel como passivo na raiz, então preventDefault numa prop
+  // onWheel não segura o scroll da página — precisa ser listener imperativo.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      applyZoom(zoom + (e.deltaY < 0 ? 0.25 : -0.25));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoom, applyZoom]);
+
+  return (
+    <div className="lightbox-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={alt}>
+      <div className="lightbox-toolbar" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={() => applyZoom(zoom - 0.25)} title="Diminuir">−</button>
+        <span>{Math.round(zoom * 100)}%</span>
+        <button type="button" onClick={() => applyZoom(zoom + 0.25)} title="Aumentar">+</button>
+        <button type="button" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} title="Tamanho original">Reset</button>
+        <button type="button" onClick={onClose} title="Fechar (Esc)" autoFocus>✕</button>
+      </div>
+      <div className="lightbox-stage" ref={stageRef} onClick={(e) => e.stopPropagation()}>
+        <img
+          src={src}
+          alt={alt}
+          className="lightbox-img"
+          draggable={false}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            cursor: zoom > 1 ? (dragRef.current ? "grabbing" : "grab") : "zoom-in"
+          }}
+          onDoubleClick={() => applyZoom(zoom > 1 ? 1 : 2.5)}
+          onPointerDown={(e) => {
+            if (zoom <= 1) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+          }}
+          onPointerMove={(e) => {
+            const d = dragRef.current;
+            if (!d) return;
+            setPan({ x: d.panX + (e.clientX - d.x), y: d.panY + (e.clientY - d.y) });
+          }}
+          onPointerUp={(e) => { dragRef.current = null; e.currentTarget.releasePointerCapture(e.pointerId); }}
+          onPointerCancel={() => { dragRef.current = null; }}
+        />
+      </div>
     </div>
   );
 }
