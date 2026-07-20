@@ -1,7 +1,7 @@
 "use client";
 
 import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadName, matchesChatStatus, mediaCaption } from "./lib/media";
+import { chatStatusFor, downloadName, matchesChatStatus, mediaCaption } from "./lib/media";
 import type { ChatStatus, ConvStatus } from "./lib/media";
 
 type ToastEntry = { id: number; msg: string; type: "error" | "success" | "info" };
@@ -497,6 +497,19 @@ export default function HomePage() {
     [conversations, detail, selectedId]
   );
   const selectedClient = clients.find((c) => c.id === selectedClientId) ?? clients[0] ?? null;
+
+  // Mantém a aba do inbox coerente com a conversa aberta: sem isso, uma conversa
+  // que muda de status (ex.: o operador responde e ela vira "ativa") continua
+  // aberta enquanto a aba mostra "Sem conversas neste filtro".
+  // Depende só de id/status da conversa — NÃO de chatStatus — pra não desfazer
+  // a troca de aba manual do operador.
+  const selectedStatus = selected?.status;
+  useEffect(() => {
+    if (!selectedStatus) return;
+    const aba = chatStatusFor(selectedStatus);
+    if (aba !== chatStatusRef.current) setChatStatus(aba);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, selectedStatus]);
 
   function refreshConversations() {
     if (!firstCrmClientId) return;

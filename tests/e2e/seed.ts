@@ -14,9 +14,9 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-/** PNG RGBA gerado na hora — precisa ter tamanho real, senão a imagem renderiza
- *  com 1px e o clique do teste cai no elemento vizinho. */
-function pngDataUri(w = 200, h = 150): string {
+/** PNG RGBA gerado na hora. Grande de proposito (1600x1200): com imagem pequena
+ *  o lightbox sempre "cabe" e o teste nao pegaria o bug de corte. */
+function pngDataUri(w = 1600, h = 1200): string {
   const tabela: number[] = [];
   for (let n = 0; n < 256; n++) {
     let c = n;

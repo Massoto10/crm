@@ -12,6 +12,13 @@ export function matchesChatStatus(status: ConvStatus, tab: ChatStatus): boolean 
   return status === "open" || status === "waiting_customer" || status === "waiting_agent";
 }
 
+// Aba da inbox onde uma conversa aparece. Inverso de matchesChatStatus.
+export function chatStatusFor(status: ConvStatus): ChatStatus {
+  if (status === "pending") return "pending";
+  if (status === "closed") return "closed";
+  return "active";
+}
+
 // Textos que o backend grava em Message.body quando a mídia vem sem legenda.
 // Espelha whatsapp-webhook.service.ts (extractText) e conversations.service.ts
 // (createAgentMedia) — se mudar lá, mudar aqui.

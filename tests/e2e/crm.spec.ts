@@ -25,6 +25,9 @@ async function abrirSidebar(page: Page) {
 async function irParaTela(page: Page, nome: RegExp) {
   await abrirSidebar(page);
   await page.locator(".nav-link").filter({ hasText: nome }).first().click();
+  // Tira o mouse da sidebar: expandida pelo hover, ela cobre a aba mais à
+  // esquerda ("Pendente") e intercepta o clique.
+  await page.mouse.move(1000, 500);
 }
 
 async function irParaChats(page: Page) {
@@ -225,6 +228,70 @@ test.describe("Feature 7 — lightbox com zoom", () => {
     expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
     await page.keyboard.press("Escape");
     expect(await page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  });
+});
+
+test.describe("Regressao — inbox nao pode ficar fora da aba da conversa aberta", () => {
+  test("aba salva em Pendente + conversa ativa aberta -> aba pula pra Ativo", async ({ page }) => {
+    // Simula o estado reportado: aba persistida em Pendente, mas a conversa que
+    // abre é ativa. Antes, o inbox mostrava "Sem conversas neste filtro".
+    await page.evaluate(() => localStorage.setItem("stn_crm_chat_status", "pending"));
+    await page.reload();
+    await irParaChats(page);
+
+    // Fecha a unica pendente respondendo? Nao — usa a aba Ativo e volta:
+    await page.getByRole("tab", { name: "Ativo" }).click();
+    await page.locator(".conversation-card").first().click();
+    await expect(page.locator(".status-tab.active")).toHaveText("Ativo");
+
+    // A conversa aberta continua visivel na lista — nunca "Sem conversas".
+    await expect(page.locator(".conversation-card.active")).toHaveCount(1);
+    await expect(page.locator(".inbox-empty, .empty-state")).toHaveCount(0);
+  });
+
+  test("conversa aberta sempre aparece na lista da aba atual", async ({ page }) => {
+    await irParaChats(page);
+    for (const aba of ["Pendente", "Ativo", "Fechado"]) {
+      await page.getByRole("tab", { name: aba }).click();
+      const cards = page.locator(".conversation-card");
+      if ((await cards.count()) === 0) continue;
+      await cards.first().click();
+      // A aba tem que conter a conversa selecionada.
+      await expect(page.locator(".conversation-card.active")).toHaveCount(1);
+    }
+  });
+});
+
+test.describe("Regressao — lightbox nao pode abrir cortando a imagem", () => {
+  test("imagem grande cabe inteira na viewport ao abrir", async ({ page }) => {
+    await irParaChats(page);
+    await page.locator(".conversation-card").first().click();
+    await page.locator(".msg-image").first().click();
+
+    const img = page.locator(".lightbox-img");
+    await expect(img).toBeVisible();
+
+    const nat = await img.evaluate((e: HTMLImageElement) => ({ w: e.naturalWidth, h: e.naturalHeight }));
+    // Garante que a fixture é maior que a tela — senão o teste passaria à toa.
+    expect(nat.w, "imagem do seed precisa ser grande pro teste valer").toBeGreaterThan(1000);
+
+    const box = (await img.boundingBox())!;
+    const vp = page.viewportSize()!;
+    expect(box.x).toBeGreaterThanOrEqual(-1);
+    expect(box.y).toBeGreaterThanOrEqual(-1);
+    expect(box.x + box.width, "imagem vazando na horizontal").toBeLessThanOrEqual(vp.width + 1);
+    expect(box.y + box.height, "imagem vazando na vertical").toBeLessThanOrEqual(vp.height + 1);
+
+    // E a proporcao original tem que ser preservada.
+    const proporcao = box.width / box.height;
+    expect(proporcao).toBeCloseTo(nat.w / nat.h, 1);
+  });
+
+  test("abre em 100%, sem zoom aplicado", async ({ page }) => {
+    await irParaChats(page);
+    await page.locator(".conversation-card").first().click();
+    await page.locator(".msg-image").first().click();
+    await expect(page.locator(".lightbox-toolbar span")).toHaveText("100%");
   });
 });
 

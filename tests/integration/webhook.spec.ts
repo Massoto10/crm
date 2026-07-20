@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaService } from "../../apps/api/src/prisma/prisma.service";
 import type { WhatsappService } from "../../apps/api/src/whatsapp/whatsapp.service";
+import { PipelineStageService } from "../../apps/api/src/pipeline/pipeline-stage.service";
 import {
   AGENT_REPLY_GRACE_MS,
   WhatsappWebhookService
@@ -27,7 +28,8 @@ beforeAll(() => {
   // subir o container de DI do Nest só pra isso.
   webhook = new WhatsappWebhookService(
     prisma as unknown as PrismaService,
-    { getMediaBase64 } as unknown as WhatsappService
+    { getMediaBase64 } as unknown as WhatsappService,
+    new PipelineStageService(prisma as unknown as PrismaService)
   );
 });
 

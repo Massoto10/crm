@@ -10,7 +10,8 @@ export const CRM_CLIENT_ID = "cli_test";
 /** Zera as tabelas que os testes tocam, respeitando as FKs. */
 export async function resetDb() {
   await prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE messages, conversations, end_customers, settings, agents, crm_clients
+    TRUNCATE TABLE messages, conversations, end_customers, settings, agents,
+                   pipeline_stages, crm_clients
     RESTART IDENTITY CASCADE
   `);
 }

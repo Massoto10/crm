@@ -4,6 +4,7 @@ import { assertFound } from "../common/assert-found";
 import { normalizeBrazilPhone } from "../common/phone";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "../whatsapp/whatsapp.service";
+import { PipelineStageService } from "../pipeline/pipeline-stage.service";
 import type { JwtPayload } from "../auth/decorators";
 
 type ChatStatusFilter = "pending" | "active" | "closed";
@@ -60,7 +61,8 @@ export class ConversationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly whatsapp: WhatsappService
+    private readonly whatsapp: WhatsappService,
+    private readonly pipeline: PipelineStageService
   ) {}
 
   private async assertConversationAccess(id: string, actor: JwtPayload) {
@@ -156,6 +158,14 @@ export class ConversationsService {
     // Gatilhos por palavra-chave (fechamento automático / setar valor) — configuráveis em Settings.
     // Best-effort: falha aqui não bloqueia o envio da mensagem.
     await this.applyMessageTriggers(conv.crmClientId, conversationId, conv.endCustomerId, body);
+
+    // Classificação automática do funil a partir do que o operador escreveu.
+    await this.pipeline.applyFromMessage({
+      crmClientId: conv.crmClientId,
+      endCustomerId: conv.endCustomerId,
+      texto: body,
+      origem: "agente"
+    });
 
     // Fire-and-forget outbound delivery for WhatsApp conversations
     if (conv.channelType === "whatsapp") {
@@ -666,6 +676,7 @@ export class ConversationsService {
         if (cents != null) {
           await this.prisma.endCustomer.update({ where: { id: endCustomerId }, data: { estimatedValueCents: cents } });
           this.logger.log(`trigger valor: estimatedValueCents=${cents} customerId=${endCustomerId}`);
+          await this.pipeline.applyFromEstimatedValue(crmClientId, endCustomerId);
         }
       }
 

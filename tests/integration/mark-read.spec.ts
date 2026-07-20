@@ -4,6 +4,7 @@ import type { JwtPayload } from "../../apps/api/src/auth/decorators";
 import { ConversationsService } from "../../apps/api/src/conversations/conversations.service";
 import type { PrismaService } from "../../apps/api/src/prisma/prisma.service";
 import type { WhatsappService } from "../../apps/api/src/whatsapp/whatsapp.service";
+import { PipelineStageService } from "../../apps/api/src/pipeline/pipeline-stage.service";
 import {
   CRM_CLIENT_ID,
   prisma,
@@ -30,7 +31,8 @@ function actor(over: Partial<JwtPayload> = {}): JwtPayload {
 beforeAll(() => {
   service = new ConversationsService(
     prisma as unknown as PrismaService,
-    { sendText: vi.fn(), sendAudio: vi.fn(), sendMedia: vi.fn() } as unknown as WhatsappService
+    { sendText: vi.fn(), sendAudio: vi.fn(), sendMedia: vi.fn() } as unknown as WhatsappService,
+    new PipelineStageService(prisma as unknown as PrismaService)
   );
 });
 

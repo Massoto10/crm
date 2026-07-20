@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "./whatsapp.service";
+import { PipelineStageService } from "../pipeline/pipeline-stage.service";
 
 // Referência de anúncio Click-to-WhatsApp (Meta/Instagram/Facebook)
 interface ExternalAdReply {
@@ -159,7 +160,8 @@ export class WhatsappWebhookService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly whatsapp: WhatsappService
+    private readonly whatsapp: WhatsappService,
+    private readonly pipeline: PipelineStageService
   ) {}
 
   async handle(payload: EvoEvent): Promise<void> {
@@ -314,6 +316,14 @@ export class WhatsappWebhookService {
     await this.prisma.endCustomer.update({
       where: { id: customer.id },
       data: { lastContactAt: now }
+    });
+
+    // Classificação automática do funil a partir do que o cliente escreveu.
+    await this.pipeline.applyFromMessage({
+      crmClientId,
+      endCustomerId: customer.id,
+      texto: text,
+      origem: "cliente"
     });
 
     this.logger.log(`message stored waMessageId=${waMessageId} convId=${conv.id}`);
