@@ -393,6 +393,10 @@ textarea { padding-top: 10px !important; resize: vertical; }
 .anexo-previa-acoes { display: flex; gap: 7px; }
 .anexo-previa-acoes input { flex: 1; height: 34px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: var(--bg); color: var(--text); font-size: 11px; outline: 0; }
 
+/* Audio gravado esperando decisao: ouvir, enviar ou descartar. */
+.audio-previa { border-top: 1px solid var(--line); padding: 10px 11px; display: flex; align-items: center; gap: 8px; background: var(--surface); }
+.audio-previa audio { flex: 1; min-width: 0; height: 34px; }
+
 /* Painel de emoji — grade simples, sem dependencia externa. */
 .emoji-painel { border-top: 1px solid var(--line); padding: 9px 11px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; background: var(--surface); max-height: 132px; overflow: auto; }
 .emoji-painel button { border: 0; background: transparent; font-size: 18px; line-height: 1; padding: 5px; border-radius: 6px; }

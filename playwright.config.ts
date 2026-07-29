@@ -19,7 +19,13 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3010",
     trace: "retain-on-failure",
-    screenshot: "only-on-failure"
+    screenshot: "only-on-failure",
+    // Microfone falso: sem isto getUserMedia trava esperando a permissão que
+    // ninguém vai clicar, e a gravação de voz fica sem cobertura.
+    permissions: ["microphone"],
+    launchOptions: {
+      args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
+    }
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }]
 });

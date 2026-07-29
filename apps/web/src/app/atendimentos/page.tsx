@@ -106,11 +106,16 @@ export default function AtendimentoPage() {
   const [anexoLegenda, setAnexoLegenda] = useState('');
   const [enviandoAnexo, setEnviandoAnexo] = useState(false);
 
-  // Gravacao de voz.
+  // Gravacao de voz. `intencaoRef` existe porque MediaRecorder.onstop e um so
+  // para tres saidas diferentes — parar, enviar e cancelar — e o handler precisa
+  // saber qual delas pediu a parada. Ref e nao estado: o onstop le o valor no
+  // momento em que dispara, e um estado daria a leitura antiga do closure.
   const [gravando, setGravando] = useState(false);
   const [enviandoAudio, setEnviandoAudio] = useState(false);
+  const [audioPendente, setAudioPendente] = useState<{ blob: Blob; mimetype: string; url: string } | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const intencaoRef = useRef<'guardar' | 'enviar' | 'cancelar'>('guardar');
 
   const [emojiAberto, setEmojiAberto] = useState(false);
 
@@ -123,6 +128,22 @@ export default function AtendimentoPage() {
     abaAjustadaRef.current = true;
     if (conversations.some((item) => item.status === 'pending')) setTab('pending');
   }, [conversations]);
+
+  // URL de objeto precisa ser criada uma vez e revogada: criar dentro do JSX
+  // gera uma nova a cada render e vaza todas as anteriores.
+  const anexoPreviaUrl = useMemo(
+    () => (anexo && anexo.type.startsWith('image/') ? URL.createObjectURL(anexo) : null),
+    [anexo],
+  );
+  useEffect(() => {
+    if (!anexoPreviaUrl) return;
+    return () => URL.revokeObjectURL(anexoPreviaUrl);
+  }, [anexoPreviaUrl]);
+
+  // Sair da tela com audio gravado e sem enviar tambem tem que liberar o blob.
+  useEffect(() => () => {
+    if (audioPendente) URL.revokeObjectURL(audioPendente.url);
+  }, [audioPendente]);
 
   const filtered = useMemo(() => conversations.filter((item) => {
     const matchesTab = tab === 'pending' ? item.status === 'pending' : tab === 'closed' ? item.status === 'closed' : ['open', 'waiting_customer', 'waiting_agent'].includes(item.status);
@@ -164,7 +185,21 @@ export default function AtendimentoPage() {
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!text.trim() || !active) return;
+    if (!active) return;
+
+    // Gravando, o botao de enviar encerra a gravacao e manda o audio direto —
+    // sem obrigar a parar antes. O envio de fato acontece no onstop.
+    if (gravando) {
+      intencaoRef.current = 'enviar';
+      recorderRef.current?.stop();
+      return;
+    }
+    if (audioPendente) {
+      await enviarAudioPendente();
+      return;
+    }
+
+    if (!text.trim()) return;
     setSending(true);
     try {
       await sendMessage(active.id, text.trim());
@@ -206,45 +241,57 @@ export default function AtendimentoPage() {
     }
   };
 
-  const alternarGravacao = async () => {
+  const despacharAudio = async (blob: Blob, mimetype: string) => {
     if (!active) return;
-
-    if (gravando) {
-      recorderRef.current?.stop();
-      return;
+    setEnviandoAudio(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Não foi possível ler o áudio'));
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsDataURL(blob);
+      });
+      await sendAudio(active.id, base64, mimetype || 'audio/webm');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Não foi possível enviar o áudio.', 'danger');
+    } finally {
+      setEnviandoAudio(false);
     }
+  };
 
+  const iniciarGravacao = async () => {
+    if (!active) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
+      intencaoRef.current = 'guardar';
+
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
+
       recorder.onstop = async () => {
         // Libera o microfone: sem isto o indicador de gravacao fica aceso no
         // navegador mesmo depois de terminar.
         stream.getTracks().forEach((track) => track.stop());
         setGravando(false);
 
+        const intencao = intencaoRef.current;
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
-        if (blob.size === 0) return;
+        chunksRef.current = [];
 
-        setEnviandoAudio(true);
-        try {
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onerror = () => reject(new Error('Não foi possível ler o áudio'));
-            reader.onload = () => resolve(String(reader.result));
-            reader.readAsDataURL(blob);
-          });
-          await sendAudio(active.id, base64, recorder.mimeType || 'audio/webm');
-        } catch (error) {
-          notify(error instanceof Error ? error.message : 'Não foi possível enviar o áudio.', 'danger');
-        } finally {
-          setEnviandoAudio(false);
+        if (intencao === 'cancelar' || blob.size === 0) return;
+
+        const mimetype = recorder.mimeType || 'audio/webm';
+        if (intencao === 'enviar') {
+          await despacharAudio(blob, mimetype);
+          return;
         }
+        // 'guardar': fica em espera para o operador ouvir, enviar ou descartar.
+        setAudioPendente({ blob, mimetype, url: URL.createObjectURL(blob) });
       };
+
       recorder.start();
       recorderRef.current = recorder;
       setGravando(true);
@@ -252,6 +299,33 @@ export default function AtendimentoPage() {
       // Permissao negada ou navegador sem suporte.
       notify('Não foi possível acessar o microfone. Verifique a permissão do navegador.', 'danger');
     }
+  };
+
+  /** Quadrado vermelho: para e segura o audio, sem enviar. */
+  const pararGravacao = () => {
+    intencaoRef.current = 'guardar';
+    recorderRef.current?.stop();
+  };
+
+  /** X durante a gravacao, ou descartar o audio ja gravado. */
+  const cancelarAudio = () => {
+    if (gravando) {
+      intencaoRef.current = 'cancelar';
+      recorderRef.current?.stop();
+      return;
+    }
+    if (audioPendente) {
+      URL.revokeObjectURL(audioPendente.url);
+      setAudioPendente(null);
+    }
+  };
+
+  const enviarAudioPendente = async () => {
+    if (!audioPendente) return;
+    const { blob, mimetype, url } = audioPendente;
+    URL.revokeObjectURL(url);
+    setAudioPendente(null);
+    await despacharAudio(blob, mimetype);
   };
 
   const close = async () => {
@@ -364,8 +438,8 @@ export default function AtendimentoPage() {
             {anexo && (
               <div className="anexo-previa">
                 <div className="anexo-previa-arquivo">
-                  {anexo.type.startsWith('image/')
-                    ? <img src={URL.createObjectURL(anexo)} alt={anexo.name} />
+                  {anexoPreviaUrl
+                    ? <img src={anexoPreviaUrl} alt={anexo.name} />
                     : <FileText size={28} />}
                   <div>
                     <strong>{anexo.name}</strong>
@@ -379,6 +453,13 @@ export default function AtendimentoPage() {
                 </div>
               </div>
             )}
+{audioPendente && (
+              <div className="audio-previa">
+                <audio controls src={audioPendente.url} />
+                <button type="button" className="icon-button" aria-label="Descartar áudio" title="Descartar áudio" onClick={cancelarAudio} disabled={enviandoAudio}><X size={18} /></button>
+                <Button type="button" onClick={() => void enviarAudioPendente()} disabled={enviandoAudio}>{enviandoAudio ? 'Enviando...' : 'Enviar'}</Button>
+              </div>
+            )}
             {emojiAberto && (
               <div className="emoji-painel" role="menu">
                 {EMOJIS.map((emoji) => (
@@ -390,9 +471,16 @@ export default function AtendimentoPage() {
               <input ref={fileInputRef} type="file" hidden onChange={escolherArquivo} accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" />
               <button type="button" aria-label="Emoji" title="Emoji" onClick={() => setEmojiAberto((value) => !value)} disabled={active.status === 'closed' || sending}><Smile size={20} /></button>
               <button type="button" aria-label="Anexar arquivo" title="Anexar arquivo" onClick={() => fileInputRef.current?.click()} disabled={active.status === 'closed' || sending || enviandoAnexo}><Paperclip size={20} /></button>
-              <button type="button" aria-label={gravando ? 'Parar gravação' : 'Gravar áudio'} title={gravando ? 'Parar gravação' : 'Gravar áudio'} className={gravando ? 'gravando' : ''} onClick={() => void alternarGravacao()} disabled={active.status === 'closed' || sending || enviandoAudio}>{gravando ? <Square size={18} /> : <Mic size={20} />}</button>
-              <input value={text} onChange={(event) => setText(event.target.value)} placeholder={gravando ? 'Gravando áudio...' : enviandoAudio ? 'Enviando áudio...' : 'Digite sua mensagem...'} disabled={active.status === 'closed' || sending || gravando} />
-              <button className="send-button" type="submit" disabled={active.status === 'closed' || sending}><Send size={19} /></button>
+              {gravando ? (
+                <>
+                  <button type="button" aria-label="Cancelar gravação" title="Cancelar gravação" onClick={cancelarAudio}><X size={20} /></button>
+                  <button type="button" aria-label="Parar gravação" title="Parar gravação" className="gravando" onClick={pararGravacao}><Square size={18} /></button>
+                </>
+              ) : (
+                <button type="button" aria-label="Gravar áudio" title="Gravar áudio" onClick={() => void iniciarGravacao()} disabled={active.status === 'closed' || sending || enviandoAudio || !!audioPendente}><Mic size={20} /></button>
+              )}
+              <input value={text} onChange={(event) => setText(event.target.value)} placeholder={gravando ? 'Gravando... toque em enviar para mandar' : enviandoAudio ? 'Enviando áudio...' : 'Digite sua mensagem...'} disabled={active.status === 'closed' || sending || gravando || !!audioPendente} />
+              <button className="send-button" type="submit" aria-label={gravando || audioPendente ? 'Enviar áudio' : 'Enviar mensagem'} disabled={active.status === 'closed' || sending || enviandoAudio}><Send size={19} /></button>
             </form>
           </> : <div className="empty-chat">Nenhuma conversa disponível neste filtro.</div>}
         </Card>
