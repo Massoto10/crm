@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Clock3, Copy, Download, FileText, MoreVertical, Paperclip, Plus, RotateCcw, Save, Search, Send, Smile, UserRoundCog } from 'lucide-react';
+import { CheckCircle2, Clock3, Copy, Download, FileText, Mic, MoreVertical, Paperclip, Plus, RotateCcw, Save, Search, Send, Smile, Square, UserRoundCog, X } from 'lucide-react';
 import { useCrm } from '@/context/crm-context';
 import { Avatar, Badge, Button, Card, PageHeader } from '@/components/ui';
 import type { ChatMessage, ConversationStatus } from '@/lib/types';
@@ -53,6 +53,15 @@ function MessageContent({ message }: { message: ChatMessage }) {
   return <div className={`message-media ${message.type === 'sticker' ? 'message-sticker' : ''}`}><Image className="message-image" src={url} alt={alt} width={640} height={480} sizes="(max-width: 820px) 70vw, 420px" unoptimized />{message.type === 'image' && hasCaption(message) ? <p>{message.content}</p> : null}</div>;
 }
 
+// Lista curta em vez de biblioteca de emoji: qualquer pacote traz alguns MB e a
+// CSP nao permite carregar sprite de fora. Cobre o que se usa em atendimento.
+const EMOJIS = [
+  '😀', '😃', '😄', '😁', '😉', '😊', '😍', '😘',
+  '🤔', '😐', '😴', '😢', '😡', '👍', '👎', '👏',
+  '🙏', '💪', '👋', '✅', '❌', '⚠️', '❤️', '🔥',
+  '🎉', '💰', '📅', '📎', '📞', '📍', '⏰', '✨',
+];
+
 function parseProposalValue(value: string) {
   const normalized = value.includes(',') ? value.replace(/\./g, '').replace(',', '.') : value;
   const amount = Number(normalized);
@@ -67,6 +76,8 @@ export default function AtendimentoPage() {
     pipelineStages,
     loadConversation,
     sendMessage,
+    sendMedia,
+    sendAudio,
     closeConversation,
     setConversationStatus,
     updateContactStage,
@@ -87,6 +98,21 @@ export default function AtendimentoPage() {
   const [savingDetails, setSavingDetails] = useState(false);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const abaAjustadaRef = useRef(false);
+
+  // Anexo: o arquivo escolhido espera numa previa ate o operador confirmar,
+  // porque enviar imagem sem chance de revisar ou legendar e caminho de erro.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [anexo, setAnexo] = useState<File | null>(null);
+  const [anexoLegenda, setAnexoLegenda] = useState('');
+  const [enviandoAnexo, setEnviandoAnexo] = useState(false);
+
+  // Gravacao de voz.
+  const [gravando, setGravando] = useState(false);
+  const [enviandoAudio, setEnviandoAudio] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+
+  const [emojiAberto, setEmojiAberto] = useState(false);
 
   // Mensagem nova de cliente entra como `pending`, mas a aba padrao e "Ativo":
   // a conversa recem-chegada cai numa aba que o operador nao esta olhando, e o
@@ -147,6 +173,84 @@ export default function AtendimentoPage() {
       notify(error instanceof Error ? error.message : 'Não foi possível enviar a mensagem.', 'danger');
     } finally {
       setSending(false);
+    }
+  };
+
+  const escolherArquivo = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const arquivo = event.target.files?.[0];
+    // Reseta o input: sem isto, escolher o MESMO arquivo duas vezes seguidas
+    // nao dispara change e o anexo parece nao funcionar.
+    event.target.value = '';
+    if (!arquivo) return;
+    // A API limita o base64 em 15 MB, e base64 infla ~33%. Barra antes de subir
+    // para o operador receber um aviso claro em vez de um 400 genérico.
+    if (arquivo.size > 10 * 1024 * 1024) {
+      notify('Arquivo maior que 10 MB. Envie um menor.', 'danger');
+      return;
+    }
+    setAnexo(arquivo);
+    setAnexoLegenda('');
+  };
+
+  const enviarAnexo = async () => {
+    if (!anexo || !active) return;
+    setEnviandoAnexo(true);
+    try {
+      await sendMedia(active.id, anexo, anexoLegenda);
+      setAnexo(null);
+      setAnexoLegenda('');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Não foi possível enviar o anexo.', 'danger');
+    } finally {
+      setEnviandoAnexo(false);
+    }
+  };
+
+  const alternarGravacao = async () => {
+    if (!active) return;
+
+    if (gravando) {
+      recorderRef.current?.stop();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        // Libera o microfone: sem isto o indicador de gravacao fica aceso no
+        // navegador mesmo depois de terminar.
+        stream.getTracks().forEach((track) => track.stop());
+        setGravando(false);
+
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
+        if (blob.size === 0) return;
+
+        setEnviandoAudio(true);
+        try {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('Não foi possível ler o áudio'));
+            reader.onload = () => resolve(String(reader.result));
+            reader.readAsDataURL(blob);
+          });
+          await sendAudio(active.id, base64, recorder.mimeType || 'audio/webm');
+        } catch (error) {
+          notify(error instanceof Error ? error.message : 'Não foi possível enviar o áudio.', 'danger');
+        } finally {
+          setEnviandoAudio(false);
+        }
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setGravando(true);
+    } catch {
+      // Permissao negada ou navegador sem suporte.
+      notify('Não foi possível acessar o microfone. Verifique a permissão do navegador.', 'danger');
     }
   };
 
@@ -257,7 +361,39 @@ export default function AtendimentoPage() {
           {active ? <>
             <div className="chat-header"><div className="chat-person"><Avatar name={active.name} /><div><strong>{active.name}</strong><span>{active.phone}</span></div></div><div className="chat-header-actions"><select value={active.stageId ?? ''} onChange={(event) => void changeStage(event.target.value)}><option value="">Sem etapa</option>{pipelineStages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><Badge tone={active.status === 'closed' ? 'gray' : active.status === 'pending' ? 'orange' : 'green'}>{statusLabel[active.status]}</Badge><button type="button" className="icon-button" aria-label="Fechar conversa" title="Fechar conversa" onClick={() => void close()} disabled={active.status === 'closed'}><CheckCircle2 size={18} /></button><div className="conversation-menu-wrap"><button type="button" className="icon-button" aria-label="Mais opções" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><MoreVertical size={18} /></button>{menuOpen && <div className="conversation-menu" role="menu"><button type="button" role="menuitem" onClick={() => void waitForCustomer()} disabled={active.status === 'closed'}><Clock3 size={16} />Aguardar cliente</button><button type="button" role="menuitem" onClick={() => void copyPhone()}><Copy size={16} />Copiar telefone</button>{active.status === 'closed' ? <button type="button" role="menuitem" onClick={() => void reopen()}><RotateCcw size={16} />Reabrir conversa</button> : <button type="button" role="menuitem" className="danger" onClick={() => void close()}><CheckCircle2 size={16} />Fechar conversa</button>}</div>}</div></div></div>
             <div ref={chatBodyRef} className="chat-body"><div className="chat-day">Histórico</div>{activeMessages.length ? activeMessages.map((message) => <div key={message.id} className={`message-row ${message.direction}`}><div className="message-bubble"><MessageContent message={message} /><small>{message.time} {message.direction === 'out' ? '✓✓' : ''}</small></div></div>) : <div className="empty-chat">Nenhuma mensagem carregada nesta conversa.</div>}</div>
-            <form className="chat-composer" onSubmit={send}><button type="button" disabled><Smile size={20} /></button><button type="button" disabled><Paperclip size={20} /></button><input value={text} onChange={(event) => setText(event.target.value)} placeholder="Digite sua mensagem..." disabled={active.status === 'closed' || sending} /><button className="send-button" type="submit" disabled={active.status === 'closed' || sending}><Send size={19} /></button></form>
+            {anexo && (
+              <div className="anexo-previa">
+                <div className="anexo-previa-arquivo">
+                  {anexo.type.startsWith('image/')
+                    ? <img src={URL.createObjectURL(anexo)} alt={anexo.name} />
+                    : <FileText size={28} />}
+                  <div>
+                    <strong>{anexo.name}</strong>
+                    <span>{(anexo.size / 1024).toFixed(0)} KB</span>
+                  </div>
+                  <button type="button" className="icon-button" aria-label="Descartar anexo" onClick={() => { setAnexo(null); setAnexoLegenda(''); }}><X size={18} /></button>
+                </div>
+                <div className="anexo-previa-acoes">
+                  <input value={anexoLegenda} onChange={(event) => setAnexoLegenda(event.target.value)} placeholder="Legenda (opcional)" disabled={enviandoAnexo} />
+                  <Button type="button" onClick={() => void enviarAnexo()} disabled={enviandoAnexo}>{enviandoAnexo ? 'Enviando...' : 'Enviar'}</Button>
+                </div>
+              </div>
+            )}
+            {emojiAberto && (
+              <div className="emoji-painel" role="menu">
+                {EMOJIS.map((emoji) => (
+                  <button key={emoji} type="button" onClick={() => { setText((value) => value + emoji); setEmojiAberto(false); }}>{emoji}</button>
+                ))}
+              </div>
+            )}
+            <form className="chat-composer" onSubmit={send}>
+              <input ref={fileInputRef} type="file" hidden onChange={escolherArquivo} accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" />
+              <button type="button" aria-label="Emoji" title="Emoji" onClick={() => setEmojiAberto((value) => !value)} disabled={active.status === 'closed' || sending}><Smile size={20} /></button>
+              <button type="button" aria-label="Anexar arquivo" title="Anexar arquivo" onClick={() => fileInputRef.current?.click()} disabled={active.status === 'closed' || sending || enviandoAnexo}><Paperclip size={20} /></button>
+              <button type="button" aria-label={gravando ? 'Parar gravação' : 'Gravar áudio'} title={gravando ? 'Parar gravação' : 'Gravar áudio'} className={gravando ? 'gravando' : ''} onClick={() => void alternarGravacao()} disabled={active.status === 'closed' || sending || enviandoAudio}>{gravando ? <Square size={18} /> : <Mic size={20} />}</button>
+              <input value={text} onChange={(event) => setText(event.target.value)} placeholder={gravando ? 'Gravando áudio...' : enviandoAudio ? 'Enviando áudio...' : 'Digite sua mensagem...'} disabled={active.status === 'closed' || sending || gravando} />
+              <button className="send-button" type="submit" disabled={active.status === 'closed' || sending}><Send size={19} /></button>
+            </form>
           </> : <div className="empty-chat">Nenhuma conversa disponível neste filtro.</div>}
         </Card>
 

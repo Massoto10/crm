@@ -114,6 +114,8 @@ type CrmContextValue = {
   updateContactDetails: (contactId: string, input: { value: number; notes: string }) => Promise<void>;
   addContactLabel: (contactId: string, name: string) => Promise<void>;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendMedia: (conversationId: string, file: File, caption?: string) => Promise<void>;
+  sendAudio: (conversationId: string, audioBase64: string, mimetype: string) => Promise<void>;
   closeConversation: (conversationId: string) => Promise<void>;
   setConversationStatus: (conversationId: string, status: Extract<ConversationStatus, 'open' | 'waiting_customer' | 'waiting_agent'>) => Promise<void>;
   createSchedule: (input: { contactId: string; body: string; scheduledAt: string }) => Promise<void>;
@@ -506,6 +508,58 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
     await refresh();
   }, [loadConversation, refresh]);
 
+  /**
+   * Anexo (imagem, video ou documento). A API espera base64 — nao multipart —
+   * porque a midia e repassada nesse formato para a Evolution e guardada como
+   * data URI. `mediatype` e o balde grosso que o WhatsApp entende; o mimetype
+   * exato vai junto para o arquivo abrir do outro lado.
+   */
+  const sendMedia = useCallback(async (
+    conversationId: string,
+    file: File,
+    caption?: string,
+  ) => {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Não foi possível ler o arquivo'));
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(file);
+    });
+
+    const mediatype: 'image' | 'video' | 'document' = file.type.startsWith('image/')
+      ? 'image'
+      : file.type.startsWith('video/')
+        ? 'video'
+        : 'document';
+
+    await apiFetch(`/conversations/${conversationId}/media`, {
+      method: 'POST',
+      body: JSON.stringify({
+        base64,
+        mimetype: file.type || 'application/octet-stream',
+        mediatype,
+        fileName: file.name,
+        caption: caption?.trim() || undefined,
+      }),
+    });
+    await loadConversation(conversationId);
+    await refresh();
+  }, [loadConversation, refresh]);
+
+  /** Nota de voz. A API transcodifica para ogg/opus antes de entregar ao WhatsApp. */
+  const sendAudio = useCallback(async (
+    conversationId: string,
+    audioBase64: string,
+    mimetype: string,
+  ) => {
+    await apiFetch(`/conversations/${conversationId}/audio`, {
+      method: 'POST',
+      body: JSON.stringify({ audioBase64, mimetype }),
+    });
+    await loadConversation(conversationId);
+    await refresh();
+  }, [loadConversation, refresh]);
+
   const closeConversation = useCallback(async (conversationId: string) => {
     await apiFetch(`/conversations/${conversationId}/close`, { method: 'PUT' });
     await refresh();
@@ -581,6 +635,8 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
     updateContactDetails,
     addContactLabel,
     sendMessage,
+    sendMedia,
+    sendAudio,
     closeConversation,
     setConversationStatus,
     createSchedule,
@@ -588,7 +644,7 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
     setOperatorActive,
     saveSettings,
     notify,
-  }), [ready, loading, session, contacts, conversations, messages, schedules, operators, departments, pipelineStages, settings, whatsapp, toasts, login, logout, refresh, loadConversation, createContact, updateContactStage, createPipelineStage, updatePipelineStage, removePipelineStage, updateContactDetails, addContactLabel, sendMessage, closeConversation, setConversationStatus, createSchedule, createOperator, setOperatorActive, saveSettings, notify]);
+  }), [ready, loading, session, contacts, conversations, messages, schedules, operators, departments, pipelineStages, settings, whatsapp, toasts, login, logout, refresh, loadConversation, createContact, updateContactStage, createPipelineStage, updatePipelineStage, removePipelineStage, updateContactDetails, addContactLabel, sendMessage, sendMedia, sendAudio, closeConversation, setConversationStatus, createSchedule, createOperator, setOperatorActive, saveSettings, notify]);
 
   return <CrmContext.Provider value={value}>{children}</CrmContext.Provider>;
 }

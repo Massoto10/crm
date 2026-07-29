@@ -377,6 +377,26 @@ textarea { padding-top: 10px !important; resize: vertical; }
 .chat-composer > button:not(.send-button) { border: 0; background: transparent; color: var(--muted); padding: 4px; }
 .chat-composer input { flex: 1; height: 40px; border: 1px solid var(--line); border-radius: 9px; padding: 0 11px; outline: 0; font-size: 11px; }
 .send-button { width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--blue); color: #fff; display: grid; place-items: center; }
+.chat-composer > button:disabled { opacity: .45; cursor: not-allowed; }
+/* Gravando: vermelho pulsante, para nao restar duvida de que o microfone esta aberto. */
+.chat-composer > button.gravando { color: #fff; background: #dc2626; border-radius: 50%; animation: gravando-pulso 1.2s ease-in-out infinite; }
+@keyframes gravando-pulso { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .chat-composer > button.gravando { animation: none; } }
+
+/* Previa do anexo — fica acima do compositor ate o operador confirmar o envio. */
+.anexo-previa { border-top: 1px solid var(--line); padding: 10px 11px; display: grid; gap: 9px; background: var(--surface); }
+.anexo-previa-arquivo { display: flex; align-items: center; gap: 10px; }
+.anexo-previa-arquivo img { width: 46px; height: 46px; object-fit: cover; border-radius: 7px; }
+.anexo-previa-arquivo > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.anexo-previa-arquivo strong { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anexo-previa-arquivo span { font-size: 9px; color: var(--muted); }
+.anexo-previa-acoes { display: flex; gap: 7px; }
+.anexo-previa-acoes input { flex: 1; height: 34px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: var(--bg); color: var(--text); font-size: 11px; outline: 0; }
+
+/* Painel de emoji — grade simples, sem dependencia externa. */
+.emoji-painel { border-top: 1px solid var(--line); padding: 9px 11px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; background: var(--surface); max-height: 132px; overflow: auto; }
+.emoji-painel button { border: 0; background: transparent; font-size: 18px; line-height: 1; padding: 5px; border-radius: 6px; }
+.emoji-painel button:hover { background: var(--bg); }
 .empty-chat { text-align: center; color: var(--muted); font-size: 11px; margin-top: 80px; }
 .contact-panel { padding: 16px; overflow: auto; }
 .contact-summary { display: flex; gap: 11px; align-items: center; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
