@@ -86,6 +86,17 @@ export default function AtendimentoPage() {
   const [notes, setNotes] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
   const chatBodyRef = useRef<HTMLDivElement>(null);
+  const abaAjustadaRef = useRef(false);
+
+  // Mensagem nova de cliente entra como `pending`, mas a aba padrao e "Ativo":
+  // a conversa recem-chegada cai numa aba que o operador nao esta olhando, e o
+  // efeito pratico e o mesmo de nao ter recebido nada. Na primeira carga, se ha
+  // pendente, abre nela. Uma vez so — depois disso a aba e escolha do operador.
+  useEffect(() => {
+    if (abaAjustadaRef.current || conversations.length === 0) return;
+    abaAjustadaRef.current = true;
+    if (conversations.some((item) => item.status === 'pending')) setTab('pending');
+  }, [conversations]);
 
   const filtered = useMemo(() => conversations.filter((item) => {
     const matchesTab = tab === 'pending' ? item.status === 'pending' : tab === 'closed' ? item.status === 'closed' : ['open', 'waiting_customer', 'waiting_agent'].includes(item.status);

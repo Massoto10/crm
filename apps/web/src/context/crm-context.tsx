@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, apiFetch } from '@/lib/api';
 import type {
@@ -122,6 +122,11 @@ type CrmContextValue = {
   saveSettings: (values: Record<string, string>) => Promise<void>;
   notify: (message: string, tone?: Toast['tone']) => void;
 };
+
+// Mesmo intervalo que o front anterior usava. Curto o bastante para o operador
+// nao perceber atraso, longo o bastante para nao martelar a API com uma sala
+// cheia de atendentes com a aba aberta.
+const CONVERSATION_POLL_MS = 8000;
 
 const CrmContext = createContext<CrmContextValue | null>(null);
 
@@ -248,6 +253,9 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [whatsapp, setWhatsapp] = useState<WhatsappStatus | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Conversa aberta no momento, para o poll saber qual detalhe recarregar.
+  // Ref e nao estado: mudar isto nao precisa re-renderizar nem recriar o timer.
+  const openConversationIdRef = useRef<string | null>(null);
 
   const notify = useCallback((message: string, tone: Toast['tone'] = 'success') => {
     const id = Date.now();
@@ -370,11 +378,62 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const loadConversation = useCallback(async (id: string) => {
+    openConversationIdRef.current = id;
     const conversation = await apiFetch<ApiConversation>(`/conversations/${id}`);
     const mapped = toConversation(conversation);
     setConversations((current) => current.map((item) => item.id === id ? mapped : item));
     setMessages(conversation.messages?.map(toMessage) ?? []);
   }, []);
+
+  /**
+   * Mensagem que chega pelo WhatsApp e gravada pelo webhook direto no banco — o
+   * navegador nao fica sabendo de nada. Sem este poll a conversa so aparece se o
+   * operador recarregar a pagina na mao, que na pratica e "o CRM nao recebe
+   * mensagem".
+   *
+   * Deliberadamente mais magro que refresh(): busca so a lista de conversas e o
+   * detalhe da que esta aberta, sem mexer em `loading` — usar refresh() aqui
+   * recarregaria nove endpoints e piscaria a tela inteira a cada ciclo.
+   */
+  useEffect(() => {
+    if (!session) return;
+
+    let cancelado = false;
+    let emVoo = false;
+
+    const tick = async () => {
+      // Aba em segundo plano nao precisa de dado fresco, e evita rajada de
+      // requisicao acumulada quando a maquina volta de suspensao.
+      if (emVoo || document.visibilityState !== 'visible') return;
+      emVoo = true;
+      try {
+        const lista = await apiFetch<ApiConversation[]>('/conversations');
+        if (cancelado) return;
+        setConversations(lista.map(toConversation));
+
+        const abertaId = openConversationIdRef.current;
+        if (abertaId) {
+          const detalhe = await apiFetch<ApiConversation>(`/conversations/${abertaId}`);
+          if (!cancelado) setMessages(detalhe.messages?.map(toMessage) ?? []);
+        }
+      } catch {
+        // Falha de rede no poll e silenciosa: a proxima volta resolve, e um
+        // toast a cada 8s numa queda de conexao seria pior que o problema.
+      } finally {
+        emVoo = false;
+      }
+    };
+
+    const timer = window.setInterval(tick, CONVERSATION_POLL_MS);
+    // Voltar para a aba atualiza na hora, sem esperar o proximo ciclo.
+    document.addEventListener('visibilitychange', tick);
+
+    return () => {
+      cancelado = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [session]);
 
   const createContact = useCallback(async (input: { name: string; phone?: string; email?: string; value: number; stageId?: string }) => {
     const customer = await apiFetch<ApiCustomer>('/end-customers', {
