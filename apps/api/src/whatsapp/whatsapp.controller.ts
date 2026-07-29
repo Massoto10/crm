@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Logger, Param, Post, Delete
 import { SkipThrottle } from "@nestjs/throttler";
 import { CurrentUser, JwtPayload, Public, Roles } from "../auth/decorators";
 import { assertCurrentTenant } from "../auth/tenant";
+import { safeCompare } from "../common/safe-compare";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "./whatsapp.service";
 import { WhatsappWebhookService } from "./whatsapp-webhook.service";
@@ -26,7 +27,7 @@ export class WhatsappController {
     const expected = process.env.WA_WEBHOOK_TOKEN;
     // Evolution pode anexar "/nome-do-evento" após a query string — compara só o primeiro segmento
     const received = token?.split("/")[0];
-    if (received !== expected) {
+    if (!safeCompare(received, expected)) {
       throw new UnauthorizedException("Token de webhook inválido");
     }
     // Não propaga erro: se a gravação falhar, logamos mas respondemos ok pra

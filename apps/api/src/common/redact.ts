@@ -12,3 +12,9 @@ export function redactUrl(rawUrl: string): string {
     return rawUrl;
   }
 }
+
+/** Mostra apenas o suficiente para correlacionar uma operaÃ§Ã£o sem expor um contato. */
+export function maskIdentifier(value: string): string {
+  if (value.length <= 4) return "****";
+  return `${"*".repeat(Math.min(value.length - 4, 12))}${value.slice(-4)}`;
+}

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { spawn } from "child_process";
 import { normalizeBrazilPhone } from "../common/phone";
+import { maskIdentifier } from "../common/redact";
 
 // Transcodifica áudio (ex: webm/opus do navegador) para ogg/opus mono 16kHz,
 // o formato de nota de voz (PTT) que o WhatsApp aceita. Sem isso o Baileys do
@@ -32,6 +33,10 @@ function transcodeToOpusOgg(inputBase64: string): Promise<string> {
   });
 }
 
+// Envio de mídia em base64 pode ser lento; o teto existe pra matar chamada
+// pendurada, não pra cortar upload legítimo.
+const EVOLUTION_TIMEOUT_MS = 30_000;
+
 export interface EvoInstance {
   instanceName: string;
   status: "open" | "connecting" | "close";
@@ -55,15 +60,24 @@ export class WhatsappService {
   }
 
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
+    // Sem timeout, uma Evolution travada segura o request do operador até o
+    // socket morrer — e com ele um worker e a conexão do navegador.
+    const safePath = path.split("?", 1)[0];
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: this.headers(),
+      signal: AbortSignal.timeout(EVOLUTION_TIMEOUT_MS),
       ...(body ? { body: JSON.stringify(body) } : {})
+    }).catch((err) => {
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        this.logger.error(`Evolution API ${method} ${safePath} → timeout após ${EVOLUTION_TIMEOUT_MS}ms`);
+        throw new Error(`Evolution API ${method} ${safePath} → timeout`);
+      }
+      throw err;
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText);
-      this.logger.error(`Evolution API ${method} ${path} → ${res.status}: ${text}`);
-      throw new Error(`Evolution API ${method} ${path} → ${res.status}: ${text}`);
+      this.logger.error(`Evolution API ${method} ${safePath} → status=${res.status}`);
+      throw new Error(`Evolution API ${method} ${safePath} → status=${res.status}`);
     }
     return res.json() as Promise<T>;
   }
@@ -142,7 +156,7 @@ export class WhatsappService {
     } catch (e) {
       this.logger.error(`sendAudio transcode falhou, usando original: ${String(e)}`);
     }
-    this.logger.log(`sendAudio instance=${instanceName} to=${number} bytes=${audio.length}`);
+    this.logger.log(`sendAudio instance=${instanceName} to=${maskIdentifier(number)} bytes=${audio.length}`);
     const res = await this.req<{ key?: { id?: string; remoteJid?: string } }>("POST", `/message/sendWhatsAppAudio/${instanceName}`, {
       number,
       audio
@@ -158,7 +172,7 @@ export class WhatsappService {
   ): Promise<{ messageId: string | null; jid: string | null }> {
     const number = phone.includes("@") ? phone : normalizeBrazilPhone(phone);
     const media = opts.base64.includes(",") ? opts.base64.slice(opts.base64.indexOf(",") + 1) : opts.base64;
-    this.logger.log(`sendMedia instance=${instanceName} to=${number} type=${opts.mediatype} bytes=${media.length}`);
+    this.logger.log(`sendMedia instance=${instanceName} to=${maskIdentifier(number)} type=${opts.mediatype} bytes=${media.length}`);
     const res = await this.req<{ key?: { id?: string; remoteJid?: string } }>("POST", `/message/sendMedia/${instanceName}`, {
       number,
       mediatype: opts.mediatype,

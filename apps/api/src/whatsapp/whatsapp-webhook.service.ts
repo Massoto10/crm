@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "./whatsapp.service";
 import { PipelineStageService } from "../pipeline/pipeline-stage.service";
+import { maskIdentifier } from "../common/redact";
 
 // Referência de anúncio Click-to-WhatsApp (Meta/Instagram/Facebook)
 interface ExternalAdReply {
@@ -249,7 +250,7 @@ export class WhatsappWebhookService {
           lastMessageAt: now
         }
       });
-      this.logger.log(`new whatsapp conversation created id=${conv.id} phone=${phone}`);
+      this.logger.log(`new whatsapp conversation created id=${conv.id} phone=${maskIdentifier(phone)}`);
     }
 
     const mediaType = detectMediaType(message);
@@ -445,7 +446,7 @@ export class WhatsappWebhookService {
     if (Object.keys(fix).length > 0) {
       try {
         customer = await this.prisma.endCustomer.update({ where: { id: customer.id }, data: fix });
-        this.logger.log(`customer identity updated id=${customer.id} ${JSON.stringify(fix)}`);
+        this.logger.log(`customer identity updated id=${customer.id} fields=${Object.keys(fix).join(",")}`);
       } catch (err) {
         // Backfill colidiu com outro registro que já tem esse phone/jid — é o
         // mesmo lead sob duas identidades (@lid vs número real). Mescla eles.
@@ -579,7 +580,7 @@ export class WhatsappWebhookService {
         where: { id: customerId },
         data: { leadSourceId: source.id, sourceUrl: ad.sourceUrl ?? null, sourceRef: ad.title ?? ad.sourceId ?? null }
       });
-      this.logger.log(`origem auto (anúncio) customerId=${customerId} source=${name} url=${ad.sourceUrl ?? "-"}`);
+      this.logger.log(`origem auto (anúncio) customerId=${customerId} source=${name}`);
       return;
     }
 

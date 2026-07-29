@@ -4,12 +4,7 @@ import * as jwt from "jsonwebtoken";
 import { PrismaService } from "../prisma/prisma.service";
 import { JwtPayload } from "./decorators";
 import { ADMIN_PERMISSIONS, normalizePermissions } from "./permissions";
-
-const jwtSecret = () => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error("JWT_SECRET não configurado");
-  return secret;
-};
+import { JWT_ALGORITHM, JWT_AUDIENCE, JWT_EXPIRES_IN, JWT_ISSUER, jwtSecret } from "./jwt.options";
 
 @Injectable()
 export class AuthService {
@@ -55,24 +50,35 @@ export class AuthService {
     return { token, user: this.toPublic(agent) };
   }
 
+  /**
+   * Com a sessão em cookie httpOnly o front não consegue mais decodificar o JWT
+   * para saber quem está logado e o que pode ver. Este endpoint passa a ser a
+   * única fonte dessa informação, então precisa devolver `permissions` — sem
+   * isso a UI não consegue montar o menu nem esconder tela sem acesso.
+   */
   async me(agentId: string) {
-    return this.prisma.agent.findUnique({
+    const agent = await this.prisma.agent.findUnique({
       where: { id: agentId },
       select: { id: true, name: true, email: true, role: true, crmClientId: true, departmentId: true }
     });
+    if (!agent) return null;
+    return { ...agent, permissions: await this.resolvePermissions(agent) };
+  }
+
+  /** Admin ignora departamento; agente herda as permissões do seu. */
+  private async resolvePermissions(agent: { role: string; departmentId?: string | null }) {
+    if (agent.role === "admin") return ADMIN_PERMISSIONS;
+    const dept = agent.departmentId
+      ? await this.prisma.department.findFirst({ where: { id: agent.departmentId, isActive: true }, select: { permissions: true } })
+      : null;
+    return normalizePermissions(dept?.permissions);
   }
 
   private async sign(agent: {
     id: string; email: string; name: string; role: string; crmClientId: string;
     departmentId?: string | null; authVersion: number;
   }) {
-    let permissions = ADMIN_PERMISSIONS;
-    if (agent.role !== "admin") {
-      const dept = agent.departmentId
-        ? await this.prisma.department.findFirst({ where: { id: agent.departmentId, isActive: true }, select: { permissions: true } })
-        : null;
-      permissions = normalizePermissions(dept?.permissions);
-    }
+    const permissions = await this.resolvePermissions(agent);
     const payload: JwtPayload = {
       sub: agent.id,
       email: agent.email,
@@ -82,7 +88,12 @@ export class AuthService {
       permissions,
       authVersion: agent.authVersion
     };
-    return jwt.sign(payload, jwtSecret(), { expiresIn: "15m" });
+    return jwt.sign(payload, jwtSecret(), {
+      expiresIn: JWT_EXPIRES_IN,
+      algorithm: JWT_ALGORITHM,
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE
+    });
   }
 
   private toPublic(a: { id: string; name: string; email: string; role: string; crmClientId: string }) {

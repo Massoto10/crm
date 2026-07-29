@@ -20,11 +20,14 @@ import { EndCustomersModule } from "./end-customers/end-customers.module";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/jwt.guard";
 import { AccessGuard } from "./auth/access.guard";
+import { CsrfGuard } from "./auth/csrf.guard";
+import { AuditModule } from "./audit/audit.module";
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
     PrismaModule,
+    AuditModule,
     AuthModule,
     CrmClientsModule,
     ConversationsModule,
@@ -43,6 +46,8 @@ import { AccessGuard } from "./auth/access.guard";
   controllers: [AppController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Antes do JwtAuthGuard: recusa requisição forjada sem gastar consulta ao banco.
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: AccessGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor }
