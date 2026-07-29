@@ -1,6 +1,30 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { assertFound } from "../common/assert-found";
+import { normalizeBrazilPhone } from "../common/phone";
 import { PrismaService } from "../prisma/prisma.service";
+
+const endCustomerSelect = {
+  id: true,
+  fullName: true,
+  companyName: true,
+  phone: true,
+  whatsappJid: true,
+  email: true,
+  lifecycleStage: true,
+  leadTemperature: true,
+  priority: true,
+  estimatedValueCents: true,
+  notes: true,
+  assignedTo: true,
+  lastContactAt: true,
+  createdAt: true,
+  pipelineStage: { select: { id: true, name: true, color: true, order: true } },
+  leadStatus: { select: { id: true, name: true, color: true } },
+  leadSource: { select: { id: true, name: true, color: true } },
+  labels: { include: { label: true } },
+  tasks: true
+} satisfies Prisma.EndCustomerSelect;
 
 @Injectable()
 export class EndCustomersService {
@@ -11,7 +35,7 @@ export class EndCustomersService {
   async search(crmClientId: string | undefined, query: string, limit = 15) {
     if (!crmClientId) throw new BadRequestException("crmClientId obrigatório");
     const q = query.trim();
-    this.logger.log(`search crmClientId=${crmClientId} q="${q}" limit=${limit}`);
+    this.logger.log(`search crmClientId=${crmClientId} hasQuery=${Boolean(q)} limit=${limit}`);
     return this.prisma.endCustomer.findMany({
       where: {
         crmClientId,
@@ -26,19 +50,49 @@ export class EndCustomersService {
             }
           : {})
       },
-      select: {
-        id: true,
-        fullName: true,
-        companyName: true,
-        phone: true,
-        whatsappJid: true,
-        email: true,
-        leadTemperature: true,
-        priority: true
-      },
+      select: endCustomerSelect,
       orderBy: { lastContactAt: "desc" },
       take: limit
     });
+  }
+
+  async create(
+    crmClientId: string,
+    data: { fullName: string; phone?: string; email?: string; estimatedValueCents?: number; pipelineStageId?: string }
+  ) {
+    const fullName = data.fullName.trim();
+    if (!fullName) throw new BadRequestException("Nome do contato é obrigatório");
+    if (data.pipelineStageId) {
+      const stage = await this.prisma.pipelineStage.findFirst({
+        where: { id: data.pipelineStageId, crmClientId, isActive: true },
+        select: { id: true }
+      });
+      if (!stage) throw new BadRequestException("Etapa não encontrada nesta organização");
+    }
+
+    const phone = data.phone?.trim() ? normalizeBrazilPhone(data.phone) : null;
+    try {
+      return await this.prisma.endCustomer.create({
+        data: {
+          crmClientId,
+          fullName,
+          phone,
+          email: data.email?.trim().toLowerCase() || null,
+          estimatedValueCents: data.estimatedValueCents ?? 0,
+          pipelineStageId: data.pipelineStageId ?? null,
+          originChannel: "manual",
+          lifecycleStage: "new",
+          leadTemperature: "cold",
+          priority: "medium"
+        },
+        select: endCustomerSelect
+      });
+    } catch (err) {
+      if (typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002") {
+        throw new ConflictException("Já existe um contato com este telefone nesta organização");
+      }
+      throw err;
+    }
   }
 
   private async assertCustomerInOrg(endCustomerId: string, crmClientId: string) {
@@ -120,7 +174,7 @@ export class EndCustomersService {
     return { ok: true };
   }
 
-  async patch(id: string, data: { estimatedValueCents?: number; assignedTo?: string | null; pipelineStageId?: string | null }, crmClientId: string) {
+  async patch(id: string, data: { estimatedValueCents?: number; notes?: string | null; assignedTo?: string | null; pipelineStageId?: string | null }, crmClientId: string) {
     this.logger.log(`patch endCustomerId=${id} crmClientId=${crmClientId}`);
     const customer = await this.prisma.endCustomer.findUnique({ where: { id }, select: { id: true, crmClientId: true } });
     assertFound(customer, "Cliente");

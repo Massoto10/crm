@@ -8,6 +8,7 @@ import { SendAudioDto } from "./dto/send-audio.dto";
 import { SendMediaDto } from "./dto/send-media.dto";
 import { AssignAgentDto } from "./dto/assign-agent.dto";
 import { SetDepartmentDto } from "./dto/set-department.dto";
+import { SetConversationStatusDto } from "./dto/set-status.dto";
 
 @Controller("conversations")
 @RequireView("chats")
@@ -66,6 +67,11 @@ export class ConversationsController {
   @Put(":id/close")
   close(@CurrentUser() user: JwtPayload, @Param("id") id: string) {
     return this.conversationsService.close(id, user);
+  }
+
+  @Put(":id/status")
+  setStatus(@CurrentUser() user: JwtPayload, @Param("id") id: string, @Body() body: SetConversationStatusDto) {
+    return this.conversationsService.setStatus(id, body.status, user);
   }
 
   @Put(":id/assign")

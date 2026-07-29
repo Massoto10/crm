@@ -4,6 +4,24 @@ import { CurrentUser, JwtPayload, Roles } from "../auth/decorators";
 import { assertCurrentTenant } from "../auth/tenant";
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const ALLOWED_KEYS = new Set([
+  "appearance_theme",
+  "company_email",
+  "company_phone",
+  "locale",
+  "pipeline_auto_enabled",
+  "pipeline_proposta_keywords",
+  "pipeline_qualificacao_keywords",
+  "post_closure_department_id",
+  "post_closure_return_days",
+  "security_access_notifications",
+  "timezone",
+  "trigger_close_enabled",
+  "trigger_close_keywords",
+  "trigger_value_enabled",
+  "trigger_value_keywords"
+]);
+const MAX_SETTINGS_PER_REQUEST = 20;
 
 @Controller("settings")
 @Roles("admin")
@@ -19,6 +37,13 @@ export class SettingsController {
   @Put(":crmClientId")
   upsert(@CurrentUser() user: JwtPayload, @Param("crmClientId") crmClientId: string, @Body() body: Record<string, unknown>) {
     assertCurrentTenant(user, crmClientId);
+    const keys = Object.keys(body);
+    if (keys.length > MAX_SETTINGS_PER_REQUEST) {
+      throw new BadRequestException(`Maximum ${MAX_SETTINGS_PER_REQUEST} settings per request`);
+    }
+    const unsupportedKey = keys.find((key) => !ALLOWED_KEYS.has(key));
+    if (unsupportedKey) throw new BadRequestException(`Unsupported setting: ${unsupportedKey}`);
+
     const sanitized: Record<string, string> = {};
     for (const [k, v] of Object.entries(body)) {
       if (FORBIDDEN_KEYS.has(k)) throw new BadRequestException(`Chave inválida: ${k}`);

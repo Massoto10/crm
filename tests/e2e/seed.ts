@@ -68,7 +68,9 @@ export const E2E = {
   senha: "e2e-senha-123",
   instancia: "crm-cli_e2e",
   legenda: "Legenda que precisa aparecer",
-  pdf: "data:application/pdf;base64,JVBERi0xLjQKJcOkw7zDtsOfCg=="
+  pdf: "data:application/pdf;base64,JVBERi0xLjQKJcOkw7zDtsOfCg==",
+  audio: "data:audio/ogg;base64,T2dnUw==",
+  video: "data:video/mp4;base64,AAAAHGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDE="
 };
 
 export async function seedE2E() {
@@ -190,6 +192,24 @@ export async function seedE2E() {
         mediaType: "sticker",
         mediaUrl: imagem,
         sentAt: new Date(Date.now() - 150 * 1000)
+      },
+      {
+        conversationId: conv1.id,
+        senderType: "end_customer",
+        senderName: "Cliente Pendente",
+        body: "[Áudio]",
+        mediaType: "audio",
+        mediaUrl: E2E.audio,
+        sentAt: new Date(Date.now() - 135 * 1000)
+      },
+      {
+        conversationId: conv1.id,
+        senderType: "end_customer",
+        senderName: "Cliente Pendente",
+        body: "[Vídeo]",
+        mediaType: "video",
+        mediaUrl: E2E.video,
+        sentAt: new Date(Date.now() - 120 * 1000)
       },
       {
         conversationId: conv1.id,

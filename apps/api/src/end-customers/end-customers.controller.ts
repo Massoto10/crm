@@ -2,9 +2,19 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import { IsNumber, IsOptional, IsString, Min, MaxLength } from "class-validator";
 import { CurrentUser, JwtPayload, RequireView } from "../auth/decorators";
 import { EndCustomersService } from "./end-customers.service";
+import { IsCuid } from "../common/validators/is-cuid";
+
+class CreateEndCustomerDto {
+  @IsString() @MaxLength(120) fullName!: string;
+  @IsOptional() @IsString() @MaxLength(30) phone?: string;
+  @IsOptional() @IsString() @MaxLength(80) email?: string;
+  @IsOptional() @IsNumber() @Min(0) estimatedValueCents?: number;
+  @IsOptional() @IsCuid() pipelineStageId?: string;
+}
 
 class PatchEndCustomerDto {
   @IsOptional() @IsNumber() @Min(0) estimatedValueCents?: number;
+  @IsOptional() @IsString() @MaxLength(5000) notes?: string | null;
   @IsOptional() @IsString() assignedTo?: string | null;
   @IsOptional() @IsString() pipelineStageId?: string | null;
 }
@@ -36,6 +46,11 @@ export class EndCustomersController {
     @Query("limit") limit?: string
   ) {
     return this.svc.search(user.crmClientId, search, limit ? parseInt(limit, 10) : 15);
+  }
+
+  @Post()
+  create(@CurrentUser() user: JwtPayload, @Body() body: CreateEndCustomerDto) {
+    return this.svc.create(user.crmClientId, body);
   }
 
   @Post(":primaryId/merge/:duplicateId")

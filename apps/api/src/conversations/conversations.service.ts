@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from "@nes
 import { ChannelType, ConversationStatus, Prisma } from "@prisma/client";
 import { assertFound } from "../common/assert-found";
 import { normalizeBrazilPhone } from "../common/phone";
+import { maskIdentifier } from "../common/redact";
 import { PrismaService } from "../prisma/prisma.service";
 import { WhatsappService } from "../whatsapp/whatsapp.service";
 import { PipelineStageService } from "../pipeline/pipeline-stage.service";
@@ -310,6 +311,16 @@ export class ConversationsService {
     return result;
   }
 
+  async setStatus(id: string, status: "open" | "waiting_customer" | "waiting_agent", actor: JwtPayload) {
+    await this.assertConversationAccess(id, actor);
+    const result = await this.prisma.conversation.update({
+      where: { id },
+      data: { status, closedAt: null }
+    });
+    this.logger.log(`conversation status changed id=${id} status=${status}`);
+    return result;
+  }
+
   async assign(id: string, agentId: string, actor: JwtPayload) {
     await this.assertConversationAccess(id, actor);
     const [conv, agent] = await Promise.all([
@@ -496,6 +507,7 @@ export class ConversationsService {
       this.logger.warn(`sendWhatsappOutbound skipped: no phone/jid for messageId=${messageId}`);
       return;
     }
+    const recipient = maskIdentifier(phone);
     this.prisma.setting
       .findFirst({ where: { crmClientId, key: "wa_instance_name" } })
       .then(async (s) => {
@@ -503,10 +515,10 @@ export class ConversationsService {
           this.logger.warn(`sendWhatsappOutbound skipped: no wa_instance_name for crmClientId=${crmClientId}`);
           return;
         }
-        this.logger.log(`sendWhatsappOutbound instance=${s.value} to=${phone}`);
+        this.logger.log(`sendWhatsappOutbound instance=${s.value} to=${recipient}`);
         const { messageId: waMessageId, jid: resolvedJid } = await this.whatsapp.sendText(s.value, phone, text);
         if (!waMessageId) {
-          this.logger.warn(`whatsapp outbound returned no messageId for to=${phone}`);
+          this.logger.warn(`whatsapp outbound returned no messageId for to=${recipient}`);
           return;
         }
         // Backfill whatsappJid on the customer when Evolution reveals the real JID
@@ -519,7 +531,7 @@ export class ConversationsService {
             await this.prisma.endCustomer.update({
               where: { id: endCustomerId }, data: { whatsappJid: resolvedJid }
             }).catch(() => null); // ignore if another record already has this jid
-            this.logger.log(`whatsappJid backfilled customerId=${endCustomerId} jid=${resolvedJid}`);
+            this.logger.log(`whatsappJid backfilled customerId=${endCustomerId} jid=${maskIdentifier(resolvedJid)}`);
           }
         }
         try {
@@ -537,7 +549,7 @@ export class ConversationsService {
           }
         }
       })
-      .catch((err: unknown) => this.logger.error(`whatsapp outbound failed to=${phone}: ${err}`));
+      .catch((err: unknown) => this.logger.error(`whatsapp outbound failed to=${recipient}: ${err}`));
   }
 
   // Envio fire-and-forget de áudio. Grava o waMessageId ou remove duplicata em corrida
@@ -547,6 +559,7 @@ export class ConversationsService {
       this.logger.warn(`sendWhatsappAudioOutbound skipped: no phone/jid for messageId=${messageId}`);
       return;
     }
+    const recipient = maskIdentifier(phone);
     this.prisma.setting
       .findFirst({ where: { crmClientId, key: "wa_instance_name" } })
       .then(async (s) => {
@@ -554,10 +567,10 @@ export class ConversationsService {
           this.logger.warn(`sendWhatsappAudioOutbound skipped: no wa_instance_name for crmClientId=${crmClientId}`);
           return;
         }
-        this.logger.log(`sendWhatsappAudioOutbound instance=${s.value} to=${phone}`);
+        this.logger.log(`sendWhatsappAudioOutbound instance=${s.value} to=${recipient}`);
         const { messageId: waMessageId } = await this.whatsapp.sendAudio(s.value, phone, audioDataUri);
         if (!waMessageId) {
-          this.logger.warn(`whatsapp audio outbound returned no messageId for to=${phone}`);
+          this.logger.warn(`whatsapp audio outbound returned no messageId for to=${recipient}`);
           return;
         }
         try {
@@ -571,7 +584,7 @@ export class ConversationsService {
           }
         }
       })
-      .catch((err: unknown) => this.logger.error(`whatsapp audio outbound failed to=${phone}: ${err}`));
+      .catch((err: unknown) => this.logger.error(`whatsapp audio outbound failed to=${recipient}: ${err}`));
   }
 
   // Envio fire-and-forget de mídia (imagem/vídeo/documento).
@@ -585,6 +598,7 @@ export class ConversationsService {
       this.logger.warn(`sendWhatsappMediaOutbound skipped: no phone/jid for messageId=${messageId}`);
       return;
     }
+    const recipient = maskIdentifier(phone);
     this.prisma.setting
       .findFirst({ where: { crmClientId, key: "wa_instance_name" } })
       .then(async (s) => {
@@ -592,10 +606,10 @@ export class ConversationsService {
           this.logger.warn(`sendWhatsappMediaOutbound skipped: no wa_instance_name for crmClientId=${crmClientId}`);
           return;
         }
-        this.logger.log(`sendWhatsappMediaOutbound instance=${s.value} to=${phone} type=${opts.mediatype}`);
+        this.logger.log(`sendWhatsappMediaOutbound instance=${s.value} to=${recipient} type=${opts.mediatype}`);
         const { messageId: waMessageId } = await this.whatsapp.sendMedia(s.value, phone, opts);
         if (!waMessageId) {
-          this.logger.warn(`whatsapp media outbound returned no messageId for to=${phone}`);
+          this.logger.warn(`whatsapp media outbound returned no messageId for to=${recipient}`);
           return;
         }
         try {
@@ -609,7 +623,7 @@ export class ConversationsService {
           }
         }
       })
-      .catch((err: unknown) => this.logger.error(`whatsapp media outbound failed to=${phone}: ${err}`));
+      .catch((err: unknown) => this.logger.error(`whatsapp media outbound failed to=${recipient}: ${err}`));
   }
 
   private async getClientSettings(crmClientId: string): Promise<Record<string, string>> {
