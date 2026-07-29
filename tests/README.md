@@ -23,22 +23,33 @@ Sobe um Postgres dedicado na porta **55432** (banco `crm_test`), separado do ban
 ```bash
 npm run test:db:up
 
-# schema — usa db push, NÃO migrate deploy (ver aviso abaixo)
+# schema — migrate deploy reproduz o schema.prisma exatamente (ver nota abaixo)
 cd packages/database
-DATABASE_URL="postgresql://test:test@localhost:55432/crm_test?schema=public" npx prisma db push
+DATABASE_URL="postgresql://test:test@localhost:55432/crm_test?schema=public" npx prisma migrate deploy
 cd ../..
 
-DATABASE_URL="postgresql://test:test@localhost:55432/crm_test?schema=public" npm run test:integration
+# Os testes leem TEST_DATABASE_URL, não DATABASE_URL.
+TEST_DATABASE_URL="postgresql://test:test@localhost:55432/crm_test?schema=public" npm run test:integration
 ```
 
 Ao terminar: `npm run test:db:down`.
 
-> **Aviso — as migrations estão defasadas em relação ao `schema.prisma`.**
-> `prisma migrate deploy` produz um banco **sem** `end_customers.lead_source_id`,
-> `source_url`, `source_ref` nem a tabela `lead_sources`, embora o schema e o código
-> em produção usem tudo isso. Um ambiente novo criado só a partir das migrations
-> quebra em qualquer query de origem de lead. Por isso os testes usam `db push`.
-> A correção de verdade é gerar a migration que falta.
+> **Drift resolvido em 28/07/2026.** As migrations estavam defasadas: `migrate deploy`
+> produzia um banco sem `messages.media_type`/`media_url`, sem
+> `end_customers.lead_source_id`/`source_url`/`source_ref` e sem a tabela
+> `lead_sources` — tudo usado pelo schema e por produção, que fora evoluindo por
+> `db push`. A migration `20260728000000_sync_media_and_lead_sources` fecha isso.
+>
+> Para checar que não voltou a divergir:
+>
+> ```bash
+> npx prisma migrate diff \
+>   --from-migrations packages/database/prisma/migrations \
+>   --to-schema-datamodel packages/database/prisma/schema.prisma \
+>   --shadow-database-url "<postgres descartável>" --script
+> ```
+>
+> Saída esperada: `-- This is an empty migration.`
 
 ## E2E (tela)
 
@@ -61,7 +72,8 @@ DATABASE_URL="postgresql://test:test@localhost:55432/crm_e2e?schema=public" npx 
 cd apps/api
 DATABASE_URL="postgresql://test:test@localhost:55432/crm_e2e?schema=public" \
 PORT=3334 WEB_ORIGIN="http://localhost:3010" \
-JWT_SECRET="e2e-jwt-secret-nao-usar-em-prod" PROCESS_SECRET="e2e-process-secret" \
+# JWT_SECRET precisa de 32+ caracteres — a API recusa subir com menos.
+JWT_SECRET="e2e-jwt-secret-com-32-chars-ou-mais-para-testes" PROCESS_SECRET="e2e-process-secret-longo-o-suficiente" \
 WA_WEBHOOK_TOKEN="e2e-webhook-token" \
 EVOLUTION_API_URL="http://localhost:9999" EVOLUTION_API_KEY="e2e" \
 npx nest start

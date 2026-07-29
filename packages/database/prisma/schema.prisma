@@ -122,6 +122,7 @@ model CrmClient {
   pipelineStages    PipelineStage[]
   settings          Setting[]
   scheduledMessages ScheduledMessage[]
+  auditLogs         AuditLog[]
 
   @@index([status])
   @@map("crm_clients")
@@ -172,6 +173,7 @@ model Agent {
   crmClient     CrmClient      @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
   department    Department?    @relation(fields: [departmentId], references: [id])
   conversations Conversation[]
+  auditLogs     AuditLog[]
 
   @@unique([crmClientId, email])
   @@index([crmClientId])
@@ -252,6 +254,7 @@ model EndCustomer {
   priority            Priority
   score               Int                    @default(0)
   estimatedValueCents Int                    @default(0) @map("estimated_value_cents")
+  notes               String?                @db.Text
   assignedTo          String?                @map("assigned_to")
   lastContactAt       DateTime?              @map("last_contact_at")
   createdAt           DateTime               @default(now()) @map("created_at")
@@ -416,4 +419,30 @@ model Task {
   @@index([crmClientId])
   @@index([endCustomerId])
   @@map("tasks")
+}
+
+/// Registro imutável das ações realizadas no CRM. O conteúdo de mensagens,
+/// senhas e tokens não é armazenado aqui; apenas o contexto operacional.
+model AuditLog {
+  id          String    @id @default(cuid())
+  crmClientId String?   @map("crm_client_id")
+  actorId     String?   @map("actor_id")
+  actorRole   String?   @map("actor_role")
+  action      String
+  method      String
+  route       String
+  statusCode  Int       @map("status_code")
+  targetType  String?   @map("target_type")
+  targetId    String?   @map("target_id")
+  metadata    Json      @default("{}")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  crmClient   CrmClient? @relation(fields: [crmClientId], references: [id], onDelete: SetNull)
+  actor       Agent?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([crmClientId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
 }
