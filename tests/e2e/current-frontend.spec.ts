@@ -7,9 +7,8 @@ const apiBase = "http://localhost:4334/api";
 
 async function login(page: Page) {
   await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "Bem-vindo de volta!" })).toBeVisible();
-  await page.getByPlaceholder("seu@email.com").fill(E2E.email);
-  await page.getByPlaceholder("Digite sua senha").fill(E2E.senha);
+  await page.getByLabel("E-mail").fill(E2E.email);
+  await page.getByLabel("Senha", { exact: true }).fill(E2E.senha);
   await page.getByRole("button", { name: "Entrar" }).click();
   await page.waitForURL("**/dashboard");
   await expect(page.locator("h1")).toContainText("Admin");

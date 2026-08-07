@@ -22,8 +22,8 @@ test("mensagem recebida aparece na lista sem recarregar a pagina", async ({ page
   await seedE2E();
 
   await page.goto("/login");
-  await page.getByPlaceholder("seu@email.com").fill(E2E.email);
-  await page.getByPlaceholder("Digite sua senha").fill(E2E.senha);
+  await page.getByLabel("E-mail").fill(E2E.email);
+  await page.getByLabel("Senha", { exact: true }).fill(E2E.senha);
   await page.getByRole("button", { name: "Entrar" }).click();
   await page.waitForURL("**/dashboard");
 
