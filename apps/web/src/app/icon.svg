@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="ScaleToNext CRM">
+  <!--
+    Mesma marca da tela de login: balao branco sobre o azul da identidade
+    (--blue #1967ff), com o canto inferior esquerdo quase reto — o
+    `border-radius: 12px 12px 12px 4px` do .login-logo, reescalado de 36px
+    para 32px.
+
+    Sem gradiente nem contorno fino de proposito: a favicon e desenhada a 16px
+    na aba, onde detalhe fino vira sujeira. Bloco solido e tres pontos e o que
+    ainda se le nesse tamanho.
+  -->
+  <path d="M7 0h18a7 7 0 0 1 7 7v18a7 7 0 0 1-7 7H3a3 3 0 0 1-3-3V7a7 7 0 0 1 7-7z" fill="#1967ff"/>
+  <path d="M10 7h12a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4h-7l-5 4v-4a4 4 0 0 1-4-4v-6a4 4 0 0 1 4-4z" fill="#fff"/>
+  <circle cx="12.4" cy="14" r="1.7" fill="#1967ff"/>
+  <circle cx="16" cy="14" r="1.7" fill="#1967ff"/>
+  <circle cx="19.6" cy="14" r="1.7" fill="#1967ff"/>
+</svg>
