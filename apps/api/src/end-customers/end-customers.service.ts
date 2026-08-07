@@ -185,7 +185,12 @@ export class EndCustomersService {
       });
       if (!stage) throw new BadRequestException("Etapa não encontrada nesta organização");
     }
-    return this.prisma.endCustomer.update({ where: { id }, data });
+    // `select` obrigatorio, igual ao create e ao findAll. Sem ele o Prisma
+    // devolve a linha crua: vem `pipelineStageId` escalar, mas nao o objeto
+    // `pipelineStage` da relacao — e o kanban agrupa os cards por
+    // `pipelineStage.id`. Ao arrastar, o card sumia de todas as colunas.
+    // As tags iam junto, porque `labels` tambem ficava de fora.
+    return this.prisma.endCustomer.update({ where: { id }, data, select: endCustomerSelect });
   }
 
   async findDuplicates(crmClientId: string) {
