@@ -168,6 +168,14 @@ model Agent {
   authVersion   Int            @default(0) @map("auth_version")
   role          UserRole       @default(agent)
   isActive      Boolean        @default(true) @map("is_active")
+  /// Última batida do heartbeat do navegador. "Online" é derivado na leitura
+  /// (lastSeenAt > agora - TTL), não gravado — assim não há estado a limpar nem
+  /// a reconstruir depois de um restart da API.
+  ///
+  /// Gravado por SQL cru de propósito: `updatedAt` é @updatedAt, e um
+  /// `prisma.agent.update()` a cada 30s por operador bumparia essa coluna sem
+  /// que nada de fato tivesse mudado no cadastro.
+  lastSeenAt    DateTime?      @map("last_seen_at")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   crmClient     CrmClient      @relation(fields: [crmClientId], references: [id], onDelete: Cascade)
@@ -177,6 +185,7 @@ model Agent {
 
   @@unique([crmClientId, email])
   @@index([crmClientId])
+  @@index([crmClientId, lastSeenAt])
   @@map("agents")
 }
 
@@ -438,11 +447,49 @@ model AuditLog {
   ipAddress   String?   @map("ip_address")
   userAgent   String?   @map("user_agent")
   createdAt   DateTime  @default(now()) @map("created_at")
+  /// Ator quando a ação vem do painel de plataforma. Coluna separada porque
+  /// `actorId` tem FK para `agents`: gravar ali o id de um PlatformAdmin viola a
+  /// constraint, e o AuditService engole o erro num try/catch — a trilha do
+  /// painel sumiria inteira sem nenhum sintoma.
+  platformAdminId String? @map("platform_admin_id")
   crmClient   CrmClient? @relation(fields: [crmClientId], references: [id], onDelete: SetNull)
   actor       Agent?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  platformAdmin PlatformAdmin? @relation(fields: [platformAdminId], references: [id], onDelete: SetNull)
 
   @@index([crmClientId, createdAt])
   @@index([actorId, createdAt])
+  @@index([platformAdminId, createdAt])
   @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+enum PlatformAdminRole {
+  owner
+  support
+}
+
+/// Administrador da plataforma — quem cria e gerencia os departamentos.
+///
+/// Tabela separada de `Agent` de propósito. Um PlatformAdmin não pertence a
+/// departamento nenhum, não aparece em listagem de operadores, e nenhum
+/// administrador de departamento consegue criar um por engano. É também o que
+/// torna impossível, por construção, que ele apareça na lista de "online": o
+/// heartbeat só existe no realm do CRM e só escreve em `agents`.
+model PlatformAdmin {
+  id           String            @id @default(cuid())
+  name         String
+  /// Único global, ao contrário de Agent.email, que é único por departamento.
+  email        String            @unique
+  passwordHash String            @map("password_hash")
+  /// Mesmo mecanismo de revogação do Agent: o guard compara a cada requisição,
+  /// então incrementar aqui derruba a sessão na hora.
+  authVersion  Int               @default(0) @map("auth_version")
+  role         PlatformAdminRole @default(owner)
+  isActive     Boolean           @default(true) @map("is_active")
+  lastLoginAt  DateTime?         @map("last_login_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  auditLogs    AuditLog[]
+
+  @@map("platform_admins")
 }

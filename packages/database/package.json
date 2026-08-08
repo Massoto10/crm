@@ -5,7 +5,8 @@
   "scripts": {
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "platform:admin": "tsx prisma/create-platform-admin.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",
