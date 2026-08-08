@@ -1,0 +1,135 @@
+// Schema do banco da PLATAFORMA (crm_platform).
+//
+// Separado de prisma/schema.prisma, que é o schema replicado em cada banco de
+// departamento. Aqui mora só o que é global: quem administra a plataforma, o
+// registro de quais departamentos existem e onde ficam, e a presença online.
+//
+// Gera um client próprio, em diretório próprio: dois schemas não podem escrever
+// no mesmo destino, e misturá-los faria o autocomplete oferecer modelos que não
+// existem no banco em que se está conectado.
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../generated/platform"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PLATFORM_DATABASE_URL")
+}
+
+enum PlatformAdminRole {
+  owner
+  support
+}
+
+/// Administrador da plataforma. Fora de qualquer departamento, de propósito:
+/// não aparece em listagem de operadores, nenhum admin de departamento
+/// consegue criar um, e — como o heartbeat só escreve pelo realm do CRM — é
+/// impossível por construção que ele apareça na lista de online.
+model PlatformAdmin {
+  id           String            @id @default(cuid())
+  name         String
+  /// Único global, ao contrário de Agent.email, que é único por departamento.
+  email        String            @unique
+  passwordHash String            @map("password_hash")
+  /// Mesmo mecanismo de revogação do Agent: o guard compara a cada requisição.
+  authVersion  Int               @default(0) @map("auth_version")
+  role         PlatformAdminRole @default(owner)
+  isActive     Boolean           @default(true) @map("is_active")
+  lastLoginAt  DateTime?         @map("last_login_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  auditLogs    PlatformAuditLog[]
+
+  @@map("platform_admins")
+}
+
+enum DepartmentStatus {
+  /// Banco sendo criado/migrado/semeado. Ninguém consegue logar ainda.
+  provisioning
+  active
+  /// Suspenso pelo painel: o banco continua intacto, o login é recusado.
+  suspended
+  /// Provisionamento falhou no meio. Aparece no painel com opção de repetir,
+  /// em vez de virar lixo invisível.
+  failed
+}
+
+/// Registro de um departamento e de onde ficam os dados dele.
+///
+/// `id` é deliberadamente o MESMO valor do `CrmClient.id` dentro do banco do
+/// departamento. O JWT já carrega `crmClientId`; assim ele identifica o
+/// departamento e resolve o banco sem tabela de tradução no meio, e sem um
+/// segundo identificador para manter em sincronia.
+model Department {
+  id             String           @id @default(cuid())
+  /// Nome fantasia, o que aparece no painel e no CRM.
+  tradeName      String           @map("trade_name")
+  legalName      String           @map("legal_name")
+  documentNumber String?          @map("document_number")
+  segment        String
+  planName       String           @map("plan_name")
+  status         DepartmentStatus @default(provisioning)
+  /// Nome do banco físico. Guardado em vez de derivado do id para que renomear
+  /// ou restaurar de um backup com outro nome não exija mexer em código.
+  databaseName   String           @unique @map("database_name")
+  /// E-mail do admin criado junto com o departamento. Só para exibição no
+  /// painel — a conta em si vive no banco do departamento.
+  adminEmail     String           @map("admin_email")
+  /// Última falha de provisionamento, para o painel mostrar o motivo.
+  provisionError String?          @map("provision_error")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  presences      AgentPresence[]
+
+  @@index([status])
+  @@map("departments")
+}
+
+/// Presença online, centralizada aqui e não no banco do departamento.
+///
+/// Com um banco por departamento, "quem está online" seria N consultas em N
+/// pools a cada poll do painel. Centralizando, o painel lê uma tabela só.
+///
+/// Os dados do agente são copiados (nome, e-mail, papel) porque não existe FK
+/// entre bancos — e porque o painel não deveria precisar abrir conexão com N
+/// departamentos só para desenhar uma lista.
+model AgentPresence {
+  departmentId String     @map("department_id")
+  agentId      String     @map("agent_id")
+  name         String
+  email        String
+  role         String
+  lastSeenAt   DateTime   @map("last_seen_at")
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@id([departmentId, agentId])
+  @@index([lastSeenAt])
+  @@map("agent_presence")
+}
+
+/// Trilha das ações do painel. Separada da auditoria do CRM: aquela vive dentro
+/// do banco de cada departamento e tem FK para `agents`, que não existe aqui.
+model PlatformAuditLog {
+  id              String         @id @default(cuid())
+  platformAdminId String?        @map("platform_admin_id")
+  /// Departamento afetado, quando a ação tem alvo.
+  departmentId    String?        @map("department_id")
+  action          String
+  method          String
+  route           String
+  statusCode      Int            @map("status_code")
+  targetType      String?        @map("target_type")
+  targetId        String?        @map("target_id")
+  metadata        Json           @default("{}")
+  ipAddress       String?        @map("ip_address")
+  userAgent       String?        @map("user_agent")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  platformAdmin   PlatformAdmin? @relation(fields: [platformAdminId], references: [id], onDelete: SetNull)
+
+  @@index([platformAdminId, createdAt])
+  @@index([departmentId, createdAt])
+  @@map("platform_audit_logs")
+}

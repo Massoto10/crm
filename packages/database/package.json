@@ -6,7 +6,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
-    "platform:admin": "tsx prisma/create-platform-admin.ts"
+    "platform:admin": "tsx prisma/create-platform-admin.ts",
+    "prisma:generate:platform": "prisma generate --schema prisma/platform/schema.prisma",
+    "prisma:migrate:platform": "prisma migrate deploy --schema prisma/platform/schema.prisma"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",

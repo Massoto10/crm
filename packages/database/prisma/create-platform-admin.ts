@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../generated/platform";
 import * as bcrypt from "bcryptjs";
 
 /**
@@ -35,7 +35,9 @@ const MIN_PASSWORD_LENGTH = 16;
 async function main() {
   const email = process.env.PLATFORM_ADMIN_EMAIL?.toLowerCase().trim();
   const password = process.env.PLATFORM_ADMIN_PASSWORD;
-  const name = process.env.PLATFORM_ADMIN_NAME?.trim() || "Administrador da plataforma";
+  // Sem valor explícito, o nome fica como está: rodar o script só para trocar
+  // a senha não pode renomear o admin para o padrão pelas costas.
+  const nomeInformado = process.env.PLATFORM_ADMIN_NAME?.trim();
 
   if (!email || !email.includes("@")) {
     throw new Error("Defina PLATFORM_ADMIN_EMAIL com um e-mail válido.");
@@ -53,10 +55,10 @@ async function main() {
 
   const admin = await prisma.platformAdmin.upsert({
     where: { email },
-    create: { name, email, passwordHash, role: "owner", isActive: true },
+    create: { name: nomeInformado || "Administrador da plataforma", email, passwordHash, role: "owner", isActive: true },
     // Trocar a senha precisa derrubar as sessões vivas daquele admin, senão um
     // token roubado continua valendo por até 15 minutos depois da troca.
-    update: { name, passwordHash, isActive: true, authVersion: { increment: 1 } },
+    update: { ...(nomeInformado ? { name: nomeInformado } : {}), passwordHash, isActive: true, authVersion: { increment: 1 } },
     select: { id: true, email: true, name: true, role: true }
   });
 
