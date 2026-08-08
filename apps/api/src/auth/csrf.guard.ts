@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from "@nestjs/common";
 import type { Request } from "express";
-import { AUTH_COOKIE } from "./cookie";
+import { SESSION_COOKIES } from "./cookie";
 
 /** Métodos sem efeito colateral não precisam de proteção CSRF. */
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -33,7 +33,10 @@ export class CsrfGuard implements CanActivate {
 
     if (SAFE_METHODS.has(req.method)) return true;
     // Sem cookie de sessão não há credencial ambiente para o navegador anexar.
-    if (!req.cookies?.[AUTH_COOKIE]) return true;
+    // Percorre TODAS as sessões: checar só a do CRM deixaria o painel de
+    // plataforma inteiro fora da proteção, e é lá que estão as ações mais
+    // destrutivas do sistema.
+    if (!SESSION_COOKIES.some((nome) => req.cookies?.[nome])) return true;
 
     // O navegador manda Origin em toda requisição não-GET, inclusive same-origin.
     // Referer é fallback para casos raros em que Origin vem ausente.

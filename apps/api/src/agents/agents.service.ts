@@ -1,8 +1,7 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { Prisma, UserRole } from "@prisma/client";
-import { randomBytes } from "crypto";
-import * as bcrypt from "bcryptjs";
 import { assertFound } from "../common/assert-found";
+import { generateTemporaryPassword, hashPassword } from "../common/password";
 import { PrismaService } from "../prisma/prisma.service";
 
 const publicAgentSelect = {
@@ -24,10 +23,6 @@ export class AgentsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private genPassword(): string {
-    return randomBytes(12).toString("base64").replace(/[+/=]/g, "").slice(0, 14);
-  }
-
   private async assertDepartmentInTenant(departmentId: string | undefined | null, crmClientId: string) {
     if (!departmentId) return;
     const dept = await this.prisma.department.findFirst({ where: { id: departmentId, crmClientId, isActive: true } });
@@ -45,8 +40,8 @@ export class AgentsService {
   async create(crmClientId: string, data: { name: string; email: string; role?: UserRole; departmentId?: string }) {
     await this.assertDepartmentInTenant(data.departmentId, crmClientId);
     const email = data.email.toLowerCase().trim();
-    const tempPassword = this.genPassword();
-    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    const tempPassword = generateTemporaryPassword();
+    const passwordHash = await hashPassword(tempPassword);
     const existing = await this.prisma.agent.findFirst({ where: { crmClientId, email } });
     if (existing) {
       const agent = await this.prisma.agent.update({
@@ -74,8 +69,8 @@ export class AgentsService {
     const agent = await this.prisma.agent.findFirst({ where: { id, crmClientId } });
     assertFound(agent, "Agente");
     if (password && password.length < 12) throw new BadRequestException("Senha deve ter ao menos 12 caracteres");
-    const newPassword = password ?? this.genPassword();
-    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const newPassword = password ?? generateTemporaryPassword();
+    const passwordHash = await hashPassword(newPassword);
     await this.prisma.agent.update({ where: { id }, data: { passwordHash, authVersion: { increment: 1 } } });
     return { ok: true, tempPassword: newPassword };
   }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecutionContext } from "@nestjs/common";
 import { ForbiddenException } from "@nestjs/common";
 import { CsrfGuard } from "../../apps/api/src/auth/csrf.guard";
-import { AUTH_COOKIE, authCookieOptions } from "../../apps/api/src/auth/cookie";
+import { AUTH_COOKIE, PLATFORM_AUTH_COOKIE, authCookieOptions } from "../../apps/api/src/auth/cookie";
 
 /** Contexto mínimo do Nest com só o que as guardas leem. */
 function ctx(req: Record<string, unknown>): ExecutionContext {
@@ -90,5 +90,48 @@ describe("CsrfGuard", () => {
   it("respeita lista de várias origens", () => {
     vi.stubEnv("WEB_ORIGIN", "https://a.example,https://scaletonext.com.br");
     expect(new CsrfGuard().canActivate(ctx(req()))).toBe(true);
+  });
+
+  /**
+   * Regressão: a guarda conhecia só o cookie do CRM. Quando o painel de
+   * plataforma ganhou o seu, TODO POST/PUT/DELETE do painel passou a pular a
+   * checagem de Origin — justamente onde ficam as ações mais destrutivas do
+   * sistema (criar e suspender departamento, resetar senha de qualquer
+   * operador). Estes dois casos passariam antes da correção.
+   */
+  it("protege sessão do painel de plataforma contra origem forasteira", () => {
+    const r = req({
+      path: "/api/platform/departments",
+      cookies: { [PLATFORM_AUTH_COOKIE]: "token-do-painel" },
+      headers: { origin: "https://evil.example" }
+    });
+    expect(() => guard.canActivate(ctx(r))).toThrow(ForbiddenException);
+  });
+
+  it("exige Origin também quando só a sessão do painel está presente", () => {
+    const r = req({
+      path: "/api/platform/departments",
+      cookies: { [PLATFORM_AUTH_COOKIE]: "token-do-painel" },
+      headers: {}
+    });
+    expect(() => guard.canActivate(ctx(r))).toThrow(ForbiddenException);
+  });
+
+  it("aceita a sessão do painel vinda de origem permitida", () => {
+    const r = req({
+      path: "/api/platform/departments",
+      cookies: { [PLATFORM_AUTH_COOKIE]: "token-do-painel" },
+      headers: { origin: "https://scaletonext.com.br" }
+    });
+    expect(guard.canActivate(ctx(r))).toBe(true);
+  });
+
+  // As duas sessões coexistem no mesmo navegador: CRM numa aba, painel na outra.
+  it("protege quando as duas sessões estão presentes", () => {
+    const r = req({
+      cookies: { [AUTH_COOKIE]: "crm", [PLATFORM_AUTH_COOKIE]: "painel" },
+      headers: { origin: "https://evil.example" }
+    });
+    expect(() => guard.canActivate(ctx(r))).toThrow(ForbiddenException);
   });
 });
