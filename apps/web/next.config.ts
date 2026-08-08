@@ -11,9 +11,16 @@ const nextConfig: NextConfig = {
     removeConsole: process.env.NODE_ENV === 'production',
   },
   async rewrites() {
+    // Navegador antigo e varias ferramentas pedem /favicon.ico direto, sem
+    // olhar o <link>. Sem isto elas recebiam o 404 em HTML do Next e caiam no
+    // icone generico. O conteudo servido e PNG — o que importa e o
+    // content-type, nao a extensao na URL.
+    const favicon = [{ source: '/favicon.ico', destination: '/icon' }];
+
     const apiProxyUrl = process.env.API_PROXY_URL;
-    if (!apiProxyUrl) return [];
+    if (!apiProxyUrl) return favicon;
     return [
+      ...favicon,
       {
         source: '/api/:path*',
         destination: `${apiProxyUrl}/api/:path*`,
