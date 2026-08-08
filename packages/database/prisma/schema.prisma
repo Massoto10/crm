@@ -4,8 +4,15 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime passa pelo PgBouncer (transaction mode).
+  url       = env("DATABASE_URL")
+  // Migrations vão DIRETO ao Postgres. O advisory lock que o Prisma usa
+  // para serializar migrations é de sessão, e transaction mode devolve a
+  // conexão ao pool no fim de cada transação. Passou nos testes em
+  // sequência, mas o modo de falha sob concorrência é migration pela
+  // metade no banco de um cliente — não vale o risco.
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 enum ClientStatus {
