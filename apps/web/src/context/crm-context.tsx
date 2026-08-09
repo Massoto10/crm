@@ -121,6 +121,7 @@ type CrmContextValue = {
   createSchedule: (input: { contactId: string; body: string; scheduledAt: string }) => Promise<void>;
   createOperator: (input: { name: string; email: string; departmentId?: string }) => Promise<{ temporaryPassword: string }>;
   setOperatorActive: (operator: Operator, isActive: boolean) => Promise<void>;
+  createDepartment: (input: { name: string; permissions?: Department['permissions'] }) => Promise<Department>;
   saveSettings: (values: Record<string, string>) => Promise<void>;
   notify: (message: string, tone?: Toast['tone']) => void;
 };
@@ -600,6 +601,15 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
     setOperators((current) => current.map((item) => item.id === operator.id ? toOperator(result, departments) : item));
   }, [departments]);
 
+  const createDepartment = useCallback(async ({ name, permissions }: { name: string; permissions?: Department['permissions'] }) => {
+    const result = await apiFetch<Department>('/departments', {
+      method: 'POST',
+      body: JSON.stringify({ name, permissions }),
+    });
+    setDepartments((current) => [...current, result].sort((a, b) => a.name.localeCompare(b.name)));
+    return result;
+  }, []);
+
   const saveSettings = useCallback(async (values: Record<string, string>) => {
     if (!session?.institutionId) throw new Error('Instituição não identificada na sessão.');
     const saved = await apiFetch<Record<string, string>>(`/settings/${session.institutionId}`, {
@@ -642,9 +652,10 @@ export function CrmProvider({ children }: { children: React.ReactNode }) {
     createSchedule,
     createOperator,
     setOperatorActive,
+    createDepartment,
     saveSettings,
     notify,
-  }), [ready, loading, session, contacts, conversations, messages, schedules, operators, departments, pipelineStages, settings, whatsapp, toasts, login, logout, refresh, loadConversation, createContact, updateContactStage, createPipelineStage, updatePipelineStage, removePipelineStage, updateContactDetails, addContactLabel, sendMessage, sendMedia, sendAudio, closeConversation, setConversationStatus, createSchedule, createOperator, setOperatorActive, saveSettings, notify]);
+  }), [ready, loading, session, contacts, conversations, messages, schedules, operators, departments, pipelineStages, settings, whatsapp, toasts, login, logout, refresh, loadConversation, createContact, updateContactStage, createPipelineStage, updatePipelineStage, removePipelineStage, updateContactDetails, addContactLabel, sendMessage, sendMedia, sendAudio, closeConversation, setConversationStatus, createSchedule, createOperator, setOperatorActive, createDepartment, saveSettings, notify]);
 
   return <CrmContext.Provider value={value}>{children}</CrmContext.Provider>;
 }
